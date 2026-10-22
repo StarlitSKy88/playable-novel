@@ -64,6 +64,12 @@ const measure = () => {
     f2: box('.hero-feature:nth-child(2)'),
     f3: box('.hero-feature:nth-child(3)'),
     dz: box('#dropzone'),
+    plate: box('.hero-plate'),
+    video: box('.hero-video'),
+    videoTime: (() => {
+      const v = document.querySelector('.hero-video');
+      return v ? v.currentTime : -1;
+    })(),
     booting: document.body.classList.contains('booting'),
     fontLoaded: document.fonts.check('16px InterVar'),
     overflow: document.documentElement.scrollWidth - window.innerWidth,
@@ -95,7 +101,8 @@ async function runChannel(page, tag, url) {
 
   /* --- Hero 存在且成规模 --- */
   check('Hero 可见', m.hero && m.hero.display !== 'none' && m.hero.h > 240, `${m.hero && m.hero.h}px 高`);
-  check('标题字号 ≈ 60u', Math.abs(m.hl1.fontSize - 60) <= 2, `${m.hl1.fontSize}px`);
+  check('舞台高度 ≈ 1280u (9:8)', Math.abs(m.hero.h - 1280) <= 3, `${m.hero.h}px @1440`);
+  check('标题字号 ≈ 118u 海报级', Math.abs(m.hl1.fontSize - 118) <= 3, `${m.hl1.fontSize}px`);
 
   /* --- 纵向层级：kicker → 两行标题 → subline → CTA → 特性卡 --- */
   check('kicker 在标题之上', m.kicker.bottom <= m.hl1.top + 1, `${m.kicker.bottom} → ${m.hl1.top}`);
@@ -109,14 +116,29 @@ async function runChannel(page, tag, url) {
     `y=${m.cta1.y} h=${m.cta1.h}`);
   check('主 CTA 在左', m.cta1.right <= m.cta2.left, `${m.cta1.right} | ${m.cta2.left}`);
 
-  /* --- 三张特性卡一行 --- */
-  check('三卡同行', Math.abs(m.f1.y - m.f2.y) <= 1 && Math.abs(m.f2.y - m.f3.y) <= 1, `y=${m.f1.y}`);
-  check('三卡左→右等宽', m.f1.left < m.f2.left && m.f2.left < m.f3.left
-    && Math.abs(m.f1.w - m.f3.w) <= 2, `${m.f1.w}/${m.f2.w}/${m.f3.w}`);
+  /* --- 三张特性点一行 --- */
+  check('三点同行', Math.abs(m.f1.y - m.f2.y) <= 1 && Math.abs(m.f2.y - m.f3.y) <= 1, `y=${m.f1.y}`);
+  check('三点左→右排列', m.f1.left < m.f2.left && m.f2.left < m.f3.left,
+    `${m.f1.left}/${m.f2.left}/${m.f3.left}`);
 
-  /* --- 折叠线：900 高视口下 CTA 必须可见，上传区顶部露出 --- */
+  /* --- 折叠线：900 高视口下 CTA 在首屏内，上传区退到折叠线下 --- */
   check('主 CTA 在首屏内', m.cta1.bottom < m.vh, `底 ${m.cta1.bottom} < ${m.vh}`);
-  check('上传区顶部露出首屏', m.dz.top < m.vh, `顶 ${m.dz.top}`);
+  check('上传区在折叠线之下', m.dz.top >= m.vh, `顶 ${m.dz.top} ≥ ${m.vh}`);
+
+  /* --- 场景层：底图铺满舞台、视频与底图同几何对齐且真实在播 --- */
+  check('底图铺满舞台', m.plate && m.plate.w >= m.hero.w && m.plate.h >= m.hero.h,
+    `${m.plate && m.plate.w}x${m.plate && m.plate.h}`);
+  check('视频与底图同几何（对齐）', m.video
+    && Math.abs(m.video.x - m.plate.x) <= 1 && Math.abs(m.video.y - m.plate.y) <= 1
+    && Math.abs(m.video.w - m.plate.w) <= 1 && Math.abs(m.video.h - m.plate.h) <= 1,
+    m.video ? `${m.video.w}x${m.video.h}` : '无视频');
+  await sleep(1600);
+  const vt = await page.evaluate(() => {
+    const v = document.querySelector('.hero-video');
+    return v ? { t: v.currentTime, paused: v.paused, ready: v.classList.contains('ready') } : null;
+  });
+  check('循环视频真实在播', vt && !vt.paused && vt.t > 0.2 && vt.ready,
+    vt ? `t=${vt.t.toFixed(2)}s ready=${vt.ready}` : '无视频');
 
   /* --- 无横向溢出 --- */
   check('1440 无横向溢出', m.overflow <= 0, `超出 ${m.overflow}px`);

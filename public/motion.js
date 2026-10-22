@@ -100,6 +100,27 @@
     Promise.all(pending).then(endBoot, endBoot);
   }
 
+  /* ---------- 场景视频：可播后淡入，避免首帧闪黑 ---------- */
+  function wireSceneVideo() {
+    var video = document.querySelector('.hero-video');
+    if (!video || reduce) return;
+    var show = function () { video.classList.add('ready'); };
+    if (video.readyState >= 2) { show(); }
+    else {
+      video.addEventListener('loadeddata', show, { once: true });
+      /* 个别浏览器 autoplay 被拦时，用户首次交互后再试一次 */
+      video.play().catch(function () {
+        var kick = function () {
+          video.play().then(show).catch(function () {});
+          window.removeEventListener('pointerdown', kick);
+          window.removeEventListener('keydown', kick);
+        };
+        window.addEventListener('pointerdown', kick, { once: true });
+        window.addEventListener('keydown', kick, { once: true });
+      });
+    }
+  }
+
   /* ---------- Hero CTA 接线 ---------- */
   function wireHero() {
     var start = document.getElementById('heroStart');
@@ -125,6 +146,7 @@
 
   function boot() {
     wireHero();
+    wireSceneVideo();
     if (reduce || !document.body.classList.contains('booting')) { endBoot(); return; }
     preHide();
     /* 等一帧让布局稳定，再挂时间线 */
