@@ -820,7 +820,7 @@ function resetPlayState() {
 }
 
 function stopGeneration() {
-  if (state.genAbort) { state.genAbort.abort(); toast('⏹ 已停止生成'); }
+  if (state.genAbort) { state.genAbort.abort(); toast('已停止生成'); }
 }
 
 function setGenerating(on) {
@@ -1004,6 +1004,8 @@ async function runGeneration(messages, opts = {}) {
   let buffer = '';
   let usage = null;
   let msgEl = null, bodyEl = null;
+  /* 通道降级标注：真实模型不可达、最终由本地引擎顶上时必须让用户知道 */
+  let degradedNote = '';
 
   const bindHid = el => { if (hid != null) el.dataset.hid = hid; return el; };
 
@@ -1016,7 +1018,15 @@ async function runGeneration(messages, opts = {}) {
       const m = buffer.match(/"([^"]{40,})"/);
       if (m) narration = m[1];
     }
-    if (msgEl && bodyEl) renderFinalMessage(msgEl, bodyEl, narration, parsed ? parsed.suggestions : null, mode);
+    if (msgEl && bodyEl) {
+      renderFinalMessage(msgEl, bodyEl, narration, parsed ? parsed.suggestions : null, mode);
+      if (degradedNote) {
+        const tag = document.createElement('div');
+        tag.className = 'fallback-tag';
+        tag.textContent = degradedNote;
+        msgEl.appendChild(tag);
+      }
+    }
     if (usage) addUsage(usage);
     scrollBottom();
     return { content: narration, parsed };
@@ -1066,6 +1076,7 @@ async function runGeneration(messages, opts = {}) {
         }
         CLOUD_OK = false;
         refreshModeBadge();
+        degradedNote = '云端模型不可达 · 本段由本地演示引擎生成';
         toast('云端模型不可用：' + (e.message || '未知错误') + '，已回退演示模式');
         // 继续往下走本地演示通道，不静默失败
       }
@@ -1145,6 +1156,11 @@ async function runGeneration(messages, opts = {}) {
       const m2 = createStoryMessage();
       bindHid(m2.el);
       renderFinalMessage(m2.el, m2.body, fb, null, mode);
+      // 透明标注：这段不是模型写的，避免用户误以为是 AI 输出
+      const tag = document.createElement('div');
+      tag.className = 'fallback-tag';
+      tag.textContent = '模型无响应 · 本段由本地兜底生成';
+      m2.el.appendChild(tag);
       return { content: fb, parsed: null };
     }
     toast('生成失败：' + e.message + (hasLiveKey() ? '（可检查 API Key 或切换到演示模式）' : ''));
@@ -1208,7 +1224,7 @@ function truncateFrom(hid) {
   state.history = state.history.slice(0, idx);
   state.summarizedTurns = Math.min(state.summarizedTurns, state.history.length);
   renderHistory(); renderMemoryPanel(); saveProgress();
-  toast('⏪ 已回溯到该节点');
+  toast('已回溯到该节点');
 }
 
 async function rewriteAiMessage(hid) {
@@ -1680,7 +1696,7 @@ function exportMarkdown() {
   if (state.factList) { lines.push('## 已确立事实', '', state.factList, ''); }
   lines.push('## 故事实录', '');
   state.history.forEach(h => {
-    if (h.role === 'user') lines.push(`### 🗡 你的行动`, '', h.content, '');
+    if (h.role === 'user') lines.push(`### 你的行动`, '', h.content, '');
     else lines.push(`### 剧情`, '', h.content, '');
   });
   if (state.charState) {
@@ -1689,7 +1705,7 @@ function exportMarkdown() {
     if ((state.charState.foreshadowing || []).length) lines.push(`- 未解伏笔：${state.charState.foreshadowing.join('；')}`);
   }
   downloadFile(`${state.novel.title || 'story'}-互动实录.md`, lines.join('\n'), 'text/markdown');
-  toast('📄 Markdown 故事书已导出');
+  toast('Markdown 故事书已导出');
 }
 
 function exportJson() {
@@ -1727,7 +1743,7 @@ function exportShareLink() {
   const url = location.origin + location.pathname + '#share=' + encodeURIComponent(b64);
   $('shareLinkBox').style.display = '';
   $('shareLinkText').value = url;
-  navigator.clipboard.writeText(url).then(() => toast('🔗 分享链接已复制'), () => toast('链接已生成，请手动复制'));
+  navigator.clipboard.writeText(url).then(() => toast('分享链接已复制'), () => toast('链接已生成，请手动复制'));
 }
 
 function downloadFile(filename, content, mime) {
@@ -2125,13 +2141,13 @@ function buildMsgOps(el, kind, hid) {
   ops.className = 'msg-ops';
   if (kind === 'user') {
     const edit = document.createElement('button');
-    edit.textContent = '✏️ 编辑';
+    edit.textContent = '编辑';
     edit.title = '编辑这条行动，并基于新输入重写后续剧情';
     edit.onclick = () => editUserMessage(el);
     ops.appendChild(edit);
   } else if (kind === 'canon') {
     const rw = document.createElement('button');
-    rw.textContent = '🔄 重写此段';
+    rw.textContent = '重写此段';
     rw.onclick = () => { el.classList.remove('canon-warn'); const b = el.querySelector('.canon-banner'); if (b) b.remove(); rewriteAiMessage(hid); };
     ops.appendChild(rw);
     const ok = document.createElement('button');
@@ -2146,13 +2162,13 @@ function buildMsgOps(el, kind, hid) {
     ops.appendChild(ok);
   } else {
     const rw = document.createElement('button');
-    rw.textContent = '🔄 重写';
+    rw.textContent = '重写';
     rw.title = '重新生成这段剧情';
     rw.onclick = () => rewriteAiMessage(el.dataset.hid);
     ops.appendChild(rw);
   }
   const del = document.createElement('button');
-  del.textContent = '✂️ 回溯';
+  del.textContent = '回溯';
   del.className = 'danger';
   del.title = '删除此条及其后的全部剧情';
   del.onclick = () => truncateFrom(el.dataset.hid);

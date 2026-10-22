@@ -5,7 +5,13 @@
   "main": "server.js",
   "scripts": {
     "start": "node server.js",
-    "dev": "node server.js"
+    "dev": "node server.js",
+    "test": "node tests/parsers.test.js && node tests/e2e.js && node tests/visual.js && node tests/flows.test.js",
+    "test:unit": "node tests/parsers.test.js",
+    "test:e2e": "node tests/e2e.js",
+    "test:visual": "node tests/visual.js",
+    "test:flows": "node tests/flows.test.js",
+    "test:cloud": "node tests/cloud.live.js"
   },
   "keywords": [
     "ai",

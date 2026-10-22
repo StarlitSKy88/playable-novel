@@ -64,6 +64,12 @@ const measure = () => {
     f2: box('.hero-feature:nth-child(2)'),
     f3: box('.hero-feature:nth-child(3)'),
     dz: box('#dropzone'),
+    brand: box('.brand'),
+    actions: box('.topbar-actions'),
+    emojiCount: (() => {
+      const re = /[\u{1F300}-\u{1FAFF}\u{2600}-\u{27BF}\u{2B00}-\u{2BFF}]/gu;
+      return (document.body.innerText.match(re) || []).length;
+    })(),
     plate: box('.hero-plate'),
     video: box('.hero-video'),
     videoTime: (() => {
@@ -161,6 +167,11 @@ async function runChannel(page, tag, url) {
   const p = await page.evaluate(measure);
   check('375 无横向溢出', p.overflow <= 0, `超出 ${p.overflow}px`);
   check('375 标题可读', p.hl1.fontSize >= 26, `${p.hl1.fontSize}px`);
+  /* VIS-11 手机顶栏：品牌区与操作区不得重叠 */
+  check('375 顶栏不重叠', p.brand && p.actions && p.brand.right <= p.actions.left + 1,
+    `brand 右 ${p.brand && p.brand.right} / actions 左 ${p.actions && p.actions.left}`);
+  /* VIS-12 去 AI 味回归：页面可见文本不得含 emoji */
+  check('无 emoji 残留', p.emojiCount === 0, `${p.emojiCount} 个`);
 
   /* --- reduced-motion：不能有元素被留在 opacity 0 --- */
   await page.setViewport({ width: 1440, height: 900 });
