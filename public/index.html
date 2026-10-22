@@ -4,10 +4,18 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Playable Novel · 可玩小说引擎</title>
+  <meta name="description" content="把任何小说变成你可以走进去的世界。上传自己的小说 + 自带 API Key，获得 AI 互动叙事：分层记忆、流式生成、世界书锁定、分支存档。" />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Noto+Serif+SC:wght@400;500;600;700&family=Noto+Sans+SC:wght@400;500;600;700&display=swap" rel="stylesheet" />
   <link rel="stylesheet" href="style.css" />
   <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>📖</text></svg>" />
 </head>
 <body>
+  <!-- 氛围背景 -->
+  <div class="bg-canvas"></div>
+  <canvas id="starfield"></canvas>
+
   <!-- 顶部导航 -->
   <header class="topbar">
     <div class="brand">
@@ -19,9 +27,23 @@
     </div>
     <div class="topbar-actions">
       <span id="modeBadge" class="mode-badge demo">演示模式</span>
+      <a class="star-btn" href="https://github.com/StarlitSKy88/playable-novel" target="_blank" rel="noopener" title="觉得不错？给个 Star 支持开源！">
+        <span class="star-icon">⭐</span>Star<span class="star-count" id="starCount">GitHub</span>
+      </a>
       <button id="btnSettings" class="btn ghost">🔑 API 设置</button>
     </div>
   </header>
+
+  <!-- 步骤进度条 -->
+  <nav class="step-bar" id="stepBar">
+    <div class="step-bar-item active" data-step="upload"><span class="sb-dot">1</span><span>上传小说</span></div>
+    <div class="step-bar-sep" data-sep="1"></div>
+    <div class="step-bar-item" data-step="world"><span class="sb-dot">2</span><span>世界卡片</span></div>
+    <div class="step-bar-sep" data-sep="2"></div>
+    <div class="step-bar-item" data-step="chapters"><span class="sb-dot">3</span><span>选择入口</span></div>
+    <div class="step-bar-sep" data-sep="3"></div>
+    <div class="step-bar-item" data-step="play"><span class="sb-dot">4</span><span>互动舞台</span></div>
+  </nav>
 
   <main class="layout">
     <!-- ========== 左侧：流程步骤 ========== -->
@@ -37,10 +59,14 @@
           </div>
         </div>
         <div class="panel-body">
+          <div class="hero-line">
+            <div class="hero-title">「 别人给你书库，我们让你走进自己的书 」</div>
+            <div class="hero-sub">LEAVE THE SCRIPTS BEHIND · YOUR STORY BEGINS HERE</div>
+          </div>
           <div class="dropzone" id="dropzone">
-            <div class="dz-icon">📄</div>
+            <span class="dz-icon">📄</span>
             <p class="dz-main">拖拽 .txt 文件到此处，或 <label class="link">点击选择<input type="file" id="fileInput" accept=".txt,.md,.text" hidden /></label></p>
-            <p class="dz-sub">也可以直接粘贴小说全文</p>
+            <p class="dz-sub">也可以直接粘贴小说全文 · 数据全程本地处理，不上传服务器</p>
           </div>
           <div class="or-divider"><span>或</span></div>
           <textarea id="pasteArea" class="paste-area" placeholder="在此粘贴小说全文（建议 3000 字以上以获得更好体验）……"></textarea>
@@ -168,6 +194,13 @@
     </aside>
   </main>
 
+  <!-- 页脚 -->
+  <footer class="footer">
+    <div class="footer-brand">Playable Novel · 可玩小说引擎</div>
+    <div>开源 · BYOK · 数据本地 · MIT License</div>
+    <div class="footer-star">觉得不错？<a href="https://github.com/StarlitSKy88/playable-novel" target="_blank" rel="noopener">⭐ 去 GitHub 点个 Star</a> · 参加 WorkBuddy 1024 造物挑战</div>
+  </footer>
+
   <!-- ========== API 设置弹窗 ========== -->
   <div class="modal-mask" id="settingsModal">
     <div class="modal">
@@ -212,7 +245,7 @@
             <button class="chip" data-img="openrouter">OpenRouter flux</button>
             <button class="chip" data-img="sdlocal">SD 本地</button>
           </div>
-          <input id="cfgImageKey" type="password" placeholder="图像 API Key（Pollinations / SD 本地留空）" style="margin-top:8px" />
+          <input id="cfgImageKey" type="password" placeholder="图像 API Key（Pollinations / SD 本地留空）" style="margin-top:8px;width:100%;background:rgba(10,9,18,.6);border:1px solid var(--border);border-radius:12px;padding:10px 14px;color:var(--text);font-size:13.5px" />
           <p class="modal-desc" style="margin-top:6px">开启后每个场景自动生成一张插画（缓存到本地 IndexedDB，不重复消耗）</p>
         </div>
         <div class="settings-section local-mode-tip" id="localModeTip" style="display:none">
@@ -308,5 +341,6 @@
   <script src="storage.js"></script>
   <script src="mock-engine.js"></script>
   <script src="app.js"></script>
+  <script src="starfield.js"></script>
 </body>
 </html>

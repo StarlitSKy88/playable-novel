@@ -47,6 +47,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   await restoreProgress();
   await loadWorldbook();
   await loadBranches();
+  loadStarCount();
 });
 
 /* 探测 Node 后端是否可用（本地 HTML 直用模式的关键判断） */
@@ -227,10 +228,23 @@ function bindWorld() {
   $('btnGoChapters').onclick = () => { renderChapterPicker(); gotoStep('step-chapters'); };
 }
 
+/* GitHub Star 实时计数（失败静默，不影响主流程） */
+async function loadStarCount() {
+  try {
+    const r = await fetch('https://api.github.com/repos/StarlitSKy88/playable-novel');
+    if (!r.ok) return;
+    const d = await r.json();
+    if (typeof d.stargazers_count === 'number') {
+      $('starCount').textContent = d.stargazers_count;
+      $('starCount').title = `${d.stargazers_count} 人点了 Star`;
+    }
+  } catch { /* 离线或超限时保持占位 */ }
+}
+
 async function analyzeWorld() {
   const card = $('worldCard');
   card.classList.add('loading');
-  card.textContent = state.playing || hasLiveKey() ? 'AI 正在推演世界设定……' : '演示模式推演中……';
+  card.innerHTML = `<span class="typing"><i></i><i></i><i></i></span><span>${state.playing || hasLiveKey() ? 'AI 正在推演世界设定……' : '演示模式推演中……'}</span>`;
   gotoStep('step-world');
 
   const novel = state.novel;
@@ -1707,9 +1721,19 @@ function scrollBottom() {
 /* ============================================================
  * 侧边栏 & 步骤切换
  * ============================================================ */
+/* 步骤切换：面板 + 顶部步骤进度条联动 */
+const STEP_ORDER = ['upload', 'world', 'chapters', 'play'];
 function gotoStep(id) {
   document.querySelectorAll('.panel').forEach(p => p.classList.remove('active'));
   $(id).classList.add('active');
+  const idx = STEP_ORDER.indexOf(id.replace('step-', ''));
+  document.querySelectorAll('.step-bar-item').forEach((el, i) => {
+    el.classList.toggle('active', i === idx);
+    el.classList.toggle('done', i < idx);
+  });
+  document.querySelectorAll('.step-bar-sep').forEach((el, i) => {
+    el.classList.toggle('done', i < idx);
+  });
 }
 function renderSideWorld() {
   const el = $('sideWorld');
