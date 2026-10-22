@@ -12,15 +12,24 @@ const state = {
   characters: [],           // 提取的人物 [{ name, desc }]
   selectedRole: null,       // 当前扮演身份
   entryChapter: 0,          // 入口章节 id
-  history: [],              // [{ role: 'user'|'ai', content }]
+  history: [],              // [{ id, role, content, suggestions, state?, canonWarn? }]
   events: [],               // 已触发事件摘要
   turn: 0,
   playing: false,
-  rollingSummary: '',       // P0-1 分层记忆：滚动摘要（故事至今）
+  rollingSummary: '',       // 分层记忆：滚动摘要（故事至今）
   summarizedTurns: 0,       // 已被摘要覆盖的轮数
-  usage: { promptTokens: 0, completionTokens: 0, calls: 0 }, // P0-4 成本统计
-  genAbort: null            // P0-2 流式：当前生成的 AbortController
+  usage: { promptTokens: 0, completionTokens: 0, calls: 0 }, // 成本统计
+  genAbort: null,           // 当前生成的 AbortController
+  worldbook: [],            // P1-5 世界书条目 [{ id, type, name, content, mode, keywords, enabled }]
+  charState: null,          // P1-8 角色状态 { location, present[], relations{}, items[], foreshadowing[] }
+  factList: '',             // P1-6 Canon Guard 原著事实清单
+  lastFactTurn: 0,          // 上次生成事实清单的轮次
+  lastCanonCheck: 0,        // 上次冲突检测的轮次
+  branchId: null            // P1-7 当前分支 id
 };
+
+/* 后端可用性：null=未探测 true=可用 false=纯本地模式（无 Node 后端） */
+let BACKEND_OK = null;
 
 const $ = id => document.getElementById(id);
 
@@ -28,6 +37,7 @@ const $ = id => document.getElementById(id);
 document.addEventListener('DOMContentLoaded', async () => {
   await DB.migrateFromLocalStorage();
   state.config = (await DB.get(PN_STORE.config, 'main')) || {};
+  detectBackend();
   bindUpload();
   bindSettings();
   bindWorld();
@@ -35,7 +45,25 @@ document.addEventListener('DOMContentLoaded', async () => {
   bindPlay();
   refreshModeBadge();
   await restoreProgress();
+  await loadWorldbook();
+  await loadBranches();
 });
+
+/* 探测 Node 后端是否可用（本地 HTML 直用模式的关键判断） */
+async function detectBackend() {
+  if (location.protocol === 'file:') { BACKEND_OK = false; return; }
+  try {
+    const ctrl = new AbortController();
+    const timer = setTimeout(() => ctrl.abort(), 2500);
+    const r = await fetch('api/health', { signal: ctrl.signal });
+    BACKEND_OK = r.ok;
+    clearTimeout(timer);
+  } catch { BACKEND_OK = false; }
+  if (!BACKEND_OK && location.protocol !== 'file:') {
+    // http(s) 但无后端：静态托管场景，同样进入本地模式
+    console.info('[Playable Novel] 未检测到 Node 后端，进入本地直用模式（演示引擎 + 浏览器直连 API）');
+  }
+}
 
 function toast(msg, ms = 2600) {
   const t = $('toast');
@@ -74,6 +102,10 @@ function bindSettings() {
     $('cfgModel').value = state.config.model || '';
     $('cfgUseMock').checked = state.config.useMock !== false;
     $('cfgStream').checked = state.config.stream !== false;
+    $('cfgImageKey').value = state.config.imageApiKey || '';
+    const curImg = state.config.imageProvider || 'none';
+    document.querySelectorAll('.chip[data-img]').forEach(x => x.classList.toggle('active', x.dataset.img === curImg));
+    $('localModeTip').style.display = BACKEND_OK === false ? '' : 'none';
     $('settingsModal').classList.add('open');
   };
   $('btnCloseSettings').onclick = () => $('settingsModal').classList.remove('open');
@@ -96,13 +128,26 @@ function bindSettings() {
     };
   });
 
+  // 图像预设
+  document.querySelectorAll('.chip[data-img]').forEach(btn => {
+    btn.onclick = () => {
+      document.querySelectorAll('.chip[data-img]').forEach(x => x.classList.remove('active'));
+      btn.classList.add('active');
+      $('cfgImageKey').placeholder = btn.dataset.img === 'pollinations' || btn.dataset.img === 'sdlocal'
+        ? '无需 Key'
+        : '图像 API Key';
+    };
+  });
+
   $('btnSaveSettings').onclick = async () => {
     await saveConfig({
       baseUrl: $('cfgBaseUrl').value.trim(),
       apiKey: $('cfgApiKey').value.trim(),
       model: $('cfgModel').value.trim(),
       useMock: $('cfgUseMock').checked,
-      stream: $('cfgStream').checked
+      stream: $('cfgStream').checked,
+      imageProvider: (document.querySelector('.chip[data-img].active') || {}).dataset ? (document.querySelector('.chip[data-img].active') || {}).dataset.img : 'none',
+      imageApiKey: $('cfgImageKey').value.trim()
     });
     $('settingsModal').classList.remove('open');
     toast(hasLiveKey() ? '✅ 已连接真实大模型，开始你的故事吧' : '⚙️ 已保存，未配置 Key 时将使用演示模式');
@@ -332,13 +377,26 @@ function bindPlay() {
   });
   $('btnRestart').onclick = () => {
     if (state.genAbort) return toast('正在生成中，请先停止或等待完成');
-    if (!confirm('确定重开本局？当前剧情进度将被清除。')) return;
+    if (!confirm('确定重开本局？当前剧情进度将被清除（世界书与历史存档保留）。')) return;
     resetPlayState();
     gotoStep('step-chapters');
     toast('已重开，重新选择入口吧');
   };
   $('btnEnding').onclick = generateEnding;
   $('btnStop').onclick = stopGeneration;
+  // P1 新按钮
+  $('btnWorldbook').onclick = openWorldbookModal;
+  $('btnWorldbookSide').onclick = openWorldbookModal;
+  $('btnCloseWorldbook').onclick = () => $('worldbookModal').classList.remove('open');
+  $('worldbookModal').onclick = e => { if (e.target.id === 'worldbookModal') e.target.classList.remove('open'); };
+  $('btnWbAutoExtract').onclick = autoExtractWorldbook;
+  $('btnWbAdd').onclick = wbAddFromForm;
+  $('btnExport').onclick = () => $('exportModal').classList.add('open');
+  $('btnCloseExport').onclick = () => $('exportModal').classList.remove('open');
+  $('exportModal').onclick = e => { if (e.target.id === 'exportModal') e.target.classList.remove('open'); };
+  $('btnExportMd').onclick = exportMarkdown;
+  $('btnExportJson').onclick = exportJson;
+  $('btnExportShare').onclick = exportShareLink;
 }
 
 function resetPlayState() {
@@ -383,6 +441,7 @@ async function startStory(chapterId) {
 
   // AI 生成开场：基于该章节原文 + 世界设定
   const chapterText = extractChapterText(chapterId);
+  const openingHid = nextHid();
   const prompt = buildStoryPrompt(chapterText) +
 `\n\n【开场任务】以「${state.selectedRole}」的视角，为这个故事写一个沉浸式开场（150-250字）：
 描写你此刻身处何地、周遭正在发生什么、身体与情绪的直观感受。
@@ -394,11 +453,16 @@ async function startStory(chapterId) {
   ], {
     temperature: 0.85, maxTokens: 500, mode: 'story',
     mockUserText: '',
-    fallback: () => fallbackNarration(chapterText)
+    fallback: () => fallbackNarration(chapterText),
+    hid: openingHid
   });
 
   if (result && result.content) {
-    state.history.push({ role: 'ai', content: result.content, id: nextHid(), suggestions: result.parsed ? result.parsed.suggestions : null });
+    state.history.push({ role: 'ai', content: result.content, id: openingHid, suggestions: result.parsed ? result.parsed.suggestions : null });
+    if (result.parsed && result.parsed.state) {
+      state.charState = { ...(state.charState || {}), ...result.parsed.state };
+      renderStatePanel();
+    }
     state.turn = 1;
     renderSideProgress();
     saveProgress();
@@ -424,6 +488,7 @@ async function sendAction() {
   if (!state.playing) return toast('请先选择入口章节开始故事');
   if (state.genAbort) return toast('正在生成中，请稍候');
   input.value = '';
+  state._lastUserInput = text;   // 供世界书关键词匹配
 
   state.history.push({ role: 'user', content: text, id: nextHid() });
   renderHistory();
@@ -437,6 +502,7 @@ async function generateReply() {
     .map(h => (h.role === 'user' ? `【你的行动】${h.content}` : `【剧情】${h.content}`)).join('\n');
   const lastUser = [...state.history].reverse().find(h => h.role === 'user');
   const actionText = lastUser ? lastUser.content : '（静观其变）';
+  const replyHid = nextHid();
 
   const prompt = buildStoryPrompt(chapterText) +
 `\n\n【身份】你正在扮演：${state.selectedRole}
@@ -460,35 +526,52 @@ ${actionText}
   ], {
     temperature: 0.9, maxTokens: 600, mode: 'story',
     mockUserText: actionText,
-    fallback: () => fallbackNarration(chapterText, actionText)
+    fallback: () => fallbackNarration(chapterText, actionText),
+    hid: replyHid
   });
 
   if (result && result.content) {
-    state.history.push({ role: 'ai', content: result.content, id: nextHid(), suggestions: result.parsed ? result.parsed.suggestions : null });
+    const aiMsg = { role: 'ai', content: result.content, id: replyHid, suggestions: result.parsed ? result.parsed.suggestions : null };
+    // P1-8 角色状态
+    if (result.parsed && result.parsed.state) {
+      state.charState = { ...(state.charState || {}), ...result.parsed.state };
+      renderStatePanel();
+    }
+    state.history.push(aiMsg);
     state.turn++;
     const summary = actionText.slice(0, 24);
     if (summary && !state.events.includes(summary)) state.events.push(summary);
     renderSideProgress();
     await maybeSummarize();
+    maybeUpdateFacts();
+    await maybeAutoSnapshot();
+    // P1-6 Canon Guard 冲突检测（异步，不阻塞阅读）
+    checkCanonConflict(result.content).then(reason => {
+      if (reason) markCanonWarning(aiMsg.id, reason);
+    });
+    // P1-9 场景插画（异步，配置后启用）
+    if (state.config.imageProvider && state.config.imageProvider !== 'none') {
+      genSceneImage(result.content, $('storyFlow').querySelector(`[data-hid="${aiMsg.id}"]`));
+    }
     saveProgress();
   }
 }
-
 async function generateEnding() {
   if (!state.playing) return toast('先开始一段故事吧');
   if (state.genAbort) return toast('正在生成中，请稍候');
   const recent = state.history.slice(-10).map(h => (h.role === 'user' ? `【你的行动】${h.content}` : `【剧情】${h.content}`)).join('\n');
   addSystemNote('—— 本局结局 ——');
+  const endingHid = nextHid();
   const result = await runGeneration([
     { role: 'system', content: '你是这个故事的地下城主，现在为这段旅程画上句点。' },
     { role: 'user', content: `基于以下互动故事线，为「${state.selectedRole}」写一个结局（150-300字）：
 呼应开头、收束本作的关键伏笔，第二人称叙述，可留一个余韵悠长的收尾。
 
 ${recent}` }
-  ], { temperature: 0.9, maxTokens: 500, mode: 'plain' });
+  ], { temperature: 0.9, maxTokens: 500, mode: 'plain', hid: endingHid });
 
   if (result && result.content) {
-    state.history.push({ role: 'ai', content: result.content, id: nextHid() });
+    state.history.push({ role: 'ai', content: result.content, id: endingHid });
     state.playing = false;
     saveProgress();
   }
@@ -500,7 +583,7 @@ ${recent}` }
  * 返回 { content, parsed } 或 null（完全失败）
  * ============================================================ */
 async function runGeneration(messages, opts = {}) {
-  const { temperature = 0.8, maxTokens = 800, mode = 'story', mockUserText = '', fallback = null } = opts;
+  const { temperature = 0.8, maxTokens = 800, mode = 'story', mockUserText = '', fallback = null, hid = null } = opts;
   const useStream = state.config.stream !== false;
 
   state.genAbort = new AbortController();
@@ -509,6 +592,8 @@ async function runGeneration(messages, opts = {}) {
   let buffer = '';
   let usage = null;
   let msgEl = null, bodyEl = null;
+
+  const bindHid = el => { if (hid != null) el.dataset.hid = hid; return el; };
 
   const finalize = () => {
     const parsed = mode === 'story' ? tryParseJson(buffer) : null;
@@ -534,14 +619,34 @@ async function runGeneration(messages, opts = {}) {
       buffer = r.content || '';
       usage = r.usage || null;
       const m = createStoryMessage();
-      msgEl = m.el; bodyEl = m.body;
+      msgEl = bindHid(m.el); bodyEl = m.body;
       return finalize();
     }
 
     // ---- 流式：SSE 增量渲染 ----
     const m = createStoryMessage();
-    msgEl = m.el; bodyEl = m.body;
+    msgEl = bindHid(m.el); bodyEl = m.body;
     renderStreamText(bodyEl, '', true);
+
+    // 本地模式（无 Node 后端）：本地生成 + 前端分片假流式
+    if (BACKEND_OK === false) {
+      let r;
+      if (hasLiveKey()) {
+        r = await directCallAI(messages, temperature, maxTokens);
+      } else {
+        await sleep(300 + Math.random() * 400);
+        r = localMock('narrate', mockUserText);
+      }
+      buffer = r.content || '';
+      usage = r.usage || null;
+      const step = 3;
+      for (let i = 0; i < buffer.length; i += step) {
+        if (state.genAbort && state.genAbort.signal.aborted) break;
+        renderStreamText(bodyEl, mode === 'story' ? streamPreview(buffer.slice(0, i + step)) : buffer.slice(0, i + step), true);
+        await sleep(16);
+      }
+      return finalize();
+    }
 
     const resp = await fetch('/api/ai/stream', {
       method: 'POST',
@@ -595,6 +700,7 @@ async function runGeneration(messages, opts = {}) {
     if (fallback) {
       const fb = fallback();
       const m2 = createStoryMessage();
+      bindHid(m2.el);
       renderFinalMessage(m2.el, m2.body, fb, null, mode);
       return { content: fb, parsed: null };
     }
@@ -646,7 +752,7 @@ function renderHistory() {
   flow.innerHTML = '';
   state.history.forEach(h => {
     if (h.role === 'user') addUserMessage(h.content, h.id);
-    else addNarration(h.content, h.suggestions, h.id);
+    else addNarration(h.content, h.suggestions, h.id, h.canonWarn);
   });
   scrollBottom();
 }
@@ -788,8 +894,10 @@ const STORY_SYSTEM_PROMPT =
 2. 使用第二人称「你」叙述玩家视角
 3. 文风贴合原著风格，注重画面感与情绪
 4. 玩家的行动必须有真实后果：世界会记住、人物会记住
-5. 不要代替玩家做决定，只呈现世界的回应与新的局势
-默认以 JSON 输出：{"narration":"剧情正文","suggestions":["建议1","建议2","建议3"],"mood":"当前氛围"}`;
+5. 不得违背「世界书」锁定设定与「已确立事实」
+6. 不要代替玩家做决定，只呈现世界的回应与新的局势
+默认以 JSON 输出：
+{"narration":"剧情正文","suggestions":["建议1","建议2","建议3"],"mood":"当前氛围","state":{"location":"当前位置","present":["在场人物"],"relations":{"人物":"关系描述"},"items":["持有物品"],"foreshadowing":["未解伏笔"]}}`;
 
 function buildStoryPrompt(chapterText) {
   const parts = [`【世界设定】\n${state.world || '（未推演）'}`];
@@ -797,32 +905,505 @@ function buildStoryPrompt(chapterText) {
   if (state.rollingSummary) {
     parts.push(`【故事至今 · 早期剧情摘要】\n${state.rollingSummary}`);
   }
+  // P1-5 世界书注入（常驻 + 关键词触发）
+  const wbText = buildWorldbookInjection();
+  if (wbText) parts.push(wbText);
+  // P1-6 Canon Guard：已确立事实清单
+  if (state.factList) {
+    parts.push(`【已确立事实 · 不得违背】\n${state.factList}`);
+  }
   parts.push(`【原著参考（当前章节上下文）】\n${chapterText.slice(0, 4000)}`);
   return parts.join('\n\n');
 }
 
 /* ============================================================
- * AI 调用（真实 / 演示双通道）
+ * P1-5 世界书（Lorebook）
+ * ============================================================ */
+const WB_TYPE_LABEL = { character: '人物', location: '地点', item: '物品', rule: '规则', foreshadow: '伏笔' };
+
+async function loadWorldbook() {
+  state.worldbook = (await DB.all(PN_STORE.worldbook)) || [];
+  renderWorldbookPanel();
+}
+async function saveWorldbook() {
+  // 全量覆盖式保存：先清空再写入（条目量小，简单可靠）
+  await DB.clear(PN_STORE.worldbook);
+  for (const e of state.worldbook) await DB.add(PN_STORE.worldbook, e);
+  renderWorldbookPanel();
+}
+
+/* 从世界卡片自动提炼条目 */
+async function autoExtractWorldbook() {
+  if (!state.world) return toast('请先完成世界推演');
+  const entries = [];
+  const nameM = state.world.match(/## 世界名称\s*\n(.+)/);
+  if (nameM) entries.push({ type: 'rule', name: nameM[1].trim(), content: `本世界观名称为「${nameM[1].trim()}」，一切设定以此为基准。`, mode: 'always', keywords: [], enabled: true, source: 'auto' });
+
+  const loreM = state.world.match(/## 世界观\s*\n([\s\S]*?)(?=\n##|$)/);
+  if (loreM) entries.push({ type: 'rule', name: '世界观总纲', content: loreM[1].trim().slice(0, 300), mode: 'always', keywords: [], enabled: true, source: 'auto' });
+
+  const charSec = state.world.match(/## 核心人物\s*\n([\s\S]*?)(?=\n##|$)/);
+  if (charSec) {
+    charSec[1].split('\n').forEach(line => {
+      const m = line.match(/^-\s*([^｜|]+)[｜|](.+)$/);
+      if (m) entries.push({ type: 'character', name: m[1].trim(), content: m[2].trim(), mode: 'keyword', keywords: [m[1].trim()], enabled: true, source: 'auto' });
+    });
+  }
+  const darkM = state.world.match(/## 当前暗流\s*\n([\s\S]*?)(?=\n##|$)/);
+  if (darkM) entries.push({ type: 'foreshadow', name: '暗流伏笔', content: darkM[1].trim().slice(0, 300), mode: 'always', keywords: [], enabled: true, source: 'auto' });
+
+  if (!entries.length) return toast('未能从世界卡片提炼出条目');
+  // 去重：同名同类型跳过
+  const exist = new Set(state.worldbook.map(e => e.type + '|' + e.name));
+  let added = 0;
+  for (const e of entries) {
+    const key = e.type + '|' + e.name;
+    if (exist.has(key)) continue;
+    e.id = Date.now() + Math.floor(Math.random() * 10000);
+    state.worldbook.push(e);
+    added++;
+  }
+  await saveWorldbook();
+  toast(added ? `✨ 已提炼 ${added} 条设定` : '条目已全部存在，无新增');
+}
+
+/* 生成注入文本：常驻 + 近期上下文命中关键词的触发条目 */
+function buildWorldbookInjection() {
+  const enabled = state.worldbook.filter(e => e.enabled !== false);
+  if (!enabled.length) return '';
+  const always = enabled.filter(e => e.mode === 'always');
+  // 关键词匹配范围：最近 3 条对话 + 当前输入（由调用方传入的 mockUserText 之外，这里扫 history 尾部）
+  const scanText = state.history.slice(-3).map(h => h.content).join(' ') + ' ' + (state._lastUserInput || '');
+  const triggered = enabled.filter(e => e.mode === 'keyword' && (e.keywords || []).some(k => scanText.includes(k)));
+  const fmt = e => `- [${WB_TYPE_LABEL[e.type] || '设定'}] ${e.name}：${e.content}`;
+  const lines = [];
+  if (always.length) lines.push('【常驻设定】', ...always.map(fmt));
+  if (triggered.length) lines.push('【触发设定】', ...triggered.map(fmt));
+  if (!lines.length) return '';
+  return `【世界书 · 以下设定已被锁定，AI 不得违背】\n${lines.join('\n')}`;
+}
+
+function renderWorldbookPanel() {
+  const el = $('sideWorldbook');
+  const meta = $('worldbookMeta');
+  if (!el) return;
+  const n = state.worldbook.length;
+  meta.textContent = n ? `${n} 条` : '';
+  if (!n) {
+    el.className = 'side-empty';
+    el.textContent = '从世界卡片自动提炼，或手动添加设定条目';
+    return;
+  }
+  el.className = 'wb-mini';
+  el.innerHTML = state.worldbook.slice(0, 5).map(e =>
+    `<div class="wb-mini-item"><span class="wb-tag wb-tag-${e.type}">${WB_TYPE_LABEL[e.type] || '设定'}</span>${escapeHtml(e.name)}${e.enabled === false ? ' <i>（停用）</i>' : ''}</div>`
+  ).join('') + (n > 5 ? `<div class="wb-mini-more">…共 ${n} 条</div>` : '');
+}
+
+function openWorldbookModal() {
+  renderWorldbookList();
+  $('worldbookModal').classList.add('open');
+}
+
+function renderWorldbookList() {
+  const list = $('wbList');
+  $('wbCount').textContent = state.worldbook.length ? `共 ${state.worldbook.length} 条` : '';
+  if (!state.worldbook.length) {
+    list.innerHTML = '<div class="wb-empty">暂无条目 · 点击上方「自动提炼」或手动添加</div>';
+    return;
+  }
+  list.innerHTML = '';
+  state.worldbook.forEach(e => {
+    const item = document.createElement('div');
+    item.className = 'wb-item' + (e.enabled === false ? ' disabled' : '');
+    item.innerHTML = `
+      <div class="wb-item-head">
+        <span class="wb-tag wb-tag-${e.type}">${WB_TYPE_LABEL[e.type] || '设定'}</span>
+        <b>${escapeHtml(e.name)}</b>
+        <span class="wb-mode">${e.mode === 'always' ? '常驻' : '触发'}</span>
+        <span class="wb-item-ops">
+          <button class="wb-op" data-act="toggle" title="${e.enabled === false ? '启用' : '停用'}">${e.enabled === false ? '▶' : '⏸'}</button>
+          <button class="wb-op danger" data-act="del" title="删除">✕</button>
+        </span>
+      </div>
+      <div class="wb-item-content">${escapeHtml(e.content)}</div>
+      ${e.mode === 'keyword' && (e.keywords || []).length ? `<div class="wb-item-kw">触发词：${e.keywords.map(escapeHtml).join(' / ')}</div>` : ''}`;
+    item.querySelector('[data-act="toggle"]').onclick = async () => {
+      e.enabled = e.enabled === false ? true : false;
+      await saveWorldbook(); renderWorldbookList();
+    };
+    item.querySelector('[data-act="del"]').onclick = async () => {
+      state.worldbook = state.worldbook.filter(x => x.id !== e.id);
+      await saveWorldbook(); renderWorldbookList();
+    };
+    list.appendChild(item);
+  });
+}
+
+async function wbAddFromForm() {
+  const name = $('wbNewName').value.trim();
+  const content = $('wbNewContent').value.trim();
+  if (!name || !content) return toast('名称和内容不能为空');
+  const entry = {
+    id: Date.now() + Math.floor(Math.random() * 10000),
+    type: $('wbNewType').value,
+    name, content,
+    mode: $('wbNewMode').value,
+    keywords: $('wbNewMode').value === 'keyword'
+      ? $('wbNewKeywords').value.split(/[,，]/).map(s => s.trim()).filter(Boolean)
+      : [],
+    enabled: true,
+    source: 'manual'
+  };
+  if (entry.mode === 'keyword' && !entry.keywords.length) entry.keywords = [name];
+  state.worldbook.push(entry);
+  await saveWorldbook(); renderWorldbookList();
+  $('wbNewName').value = ''; $('wbNewContent').value = ''; $('wbNewKeywords').value = '';
+  toast('✅ 已添加世界书条目');
+}
+
+/* ============================================================
+ * P1-6 Canon Guard 原著一致性守护
+ * 每 FACT_INTERVAL 轮生成「已确立事实清单」注入 prompt；
+ * 每次生成后用轻量校验检测冲突，冲突段落标黄 + 一键重写/接受
+ * ============================================================ */
+const FACT_INTERVAL = 8;   // 事实清单更新间隔（轮）
+const CHECK_INTERVAL = 4;  // 冲突检测间隔（轮）
+
+function maybeUpdateFacts() {
+  if (state.turn - state.lastFactTurn < FACT_INTERVAL) return null;
+  state.lastFactTurn = state.turn;
+  return updateFacts();
+}
+
+async function updateFacts() {
+  const recent = state.history.slice(-FACT_INTERVAL * 2)
+    .map(h => (h.role === 'user' ? `【你的行动】${h.content}` : `【剧情】${h.content}`)).join('\n');
+  const prompt = `你是原著设定守护者。请从以下剧情中提取「已确立事实」清单（不超过 8 条）：
+包括：已发生的关键事件、人物当前状态与关系、主角获得的物品、已揭示的秘密。
+${state.factList ? `\n【此前清单】\n${state.factList}\n\n【新剧情】\n${recent}\n请合并更新（过时的事实要替换）。` : `\n【剧情】\n${recent}`}
+每行一条，格式：- 事实内容。只输出清单。`;
+  try {
+    const r = await callAI([
+      { role: 'system', content: '你是严谨的剧情事实记录员。' },
+      { role: 'user', content: prompt }
+    ], 0.2, 400, 'summarize');
+    state.factList = r.content;
+  } catch (e) { console.warn('事实清单更新失败:', e.message); }
+}
+
+/* 生成后校验：新剧情是否与已确立事实冲突 */
+async function checkCanonConflict(narration) {
+  if (!state.factList || !narration) return null;
+  if (state.turn - state.lastCanonCheck < CHECK_INTERVAL) return null;
+  state.lastCanonCheck = state.turn;
+  const prompt = `【已确立事实】\n${state.factList}\n\n【新生成的剧情】\n${narration}\n\n请判断新剧情是否与已确立事实矛盾（如人物状态、已发生事件、持有物品、关系变化）。
+只输出 JSON：{"conflict":true/false,"reason":"冲突说明（无冲突则空字符串）"}`;
+  try {
+    const r = await callAI([
+      { role: 'system', content: '你是严格的逻辑校验员，只做矛盾检测，不做创作。' },
+      { role: 'user', content: prompt }
+    ], 0.1, 200);
+    const m = (r.content || '').match(/\{[\s\S]*\}/);
+    if (!m) return null;
+    const obj = JSON.parse(m[0]);
+    return obj.conflict ? (obj.reason || '与已确立事实存在冲突') : null;
+  } catch (e) { return null; }
+}
+
+/* ============================================================
+ * P1-7 分支存档（简化版：时间线 + 快照）
+ * ============================================================ */
+async function loadBranches() {
+  state.branches = (await DB.all(PN_STORE.saves)) || [];
+  renderTimeline();
+}
+async function saveSnapshot(name) {
+  const snap = {
+    name: name || `第 ${state.turn} 回合`,
+    createdAt: Date.now(),
+    turn: state.turn,
+    entryChapter: state.entryChapter,
+    selectedRole: state.selectedRole,
+    chapterTitle: (state.novel.chapters.find(c => c.id === state.entryChapter) || {}).title || '',
+    snapshot: {
+      history: state.history.slice(-40),
+      rollingSummary: state.rollingSummary,
+      summarizedTurns: state.summarizedTurns,
+      events: state.events,
+      factList: state.factList,
+      charState: state.charState,
+      turn: state.turn
+    }
+  };
+  const id = await DB.add(PN_STORE.saves, snap);
+  snap.id = id;
+  state.branches.unshift(snap);
+  renderTimeline();
+  return snap;
+}
+
+/* 自动快照：每 AUTO_SNAPSHOT 轮一次 */
+async function maybeAutoSnapshot() {
+  if (state.turn > 0 && state.turn % AUTO_SNAPSHOT === 0) {
+    const exist = state.branches.find(b => b.turn === state.turn);
+    if (!exist) await saveSnapshot(`自动存档 · 第 ${state.turn} 回合`);
+  }
+}
+const AUTO_SNAPSHOT = 5;
+
+function renderTimeline() {
+  const el = $('timelineList');
+  if (!el) return;
+  $('timelineMeta').textContent = state.branches.length ? `${state.branches.length} 个存档` : '';
+  if (!state.branches.length) {
+    el.innerHTML = '<div class="side-empty">尚无存档 · 剧情推进中自动创建快照</div>';
+    return;
+  }
+  el.innerHTML = '';
+  state.branches.slice(0, 12).forEach(b => {
+    const item = document.createElement('div');
+    item.className = 'timeline-item';
+    const d = new Date(b.createdAt);
+    const time = `${d.getMonth() + 1}/${d.getDate()} ${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
+    item.innerHTML = `${escapeHtml(b.name)}<small>${time} · ${escapeHtml(b.chapterTitle)} · ${b.snapshot.history.length} 条剧情</small>`;
+    item.title = '点击读取此存档';
+    item.onclick = () => loadBranch(b.id);
+    el.appendChild(item);
+  });
+}
+
+async function loadBranch(id) {
+  const b = state.branches.find(x => x.id === id);
+  if (!b) return;
+  if (state.genAbort) return toast('正在生成中，请先停止');
+  if (!confirm(`读取存档「${b.name}」？当前未保存的进度将被替换。`)) return;
+  state.history = b.snapshot.history.map(h => ({ ...h, id: h.id || nextHid() }));
+  _hidSeq = state.history.reduce((m, h) => Math.max(m, h.id || 0), 0) + 1;
+  state.rollingSummary = b.snapshot.rollingSummary || '';
+  state.summarizedTurns = b.snapshot.summarizedTurns || 0;
+  state.events = b.snapshot.events || [];
+  state.factList = b.snapshot.factList || '';
+  state.charState = b.snapshot.charState || null;
+  state.turn = b.snapshot.turn || 0;
+  state.entryChapter = b.entryChapter;
+  state.selectedRole = b.selectedRole;
+  state.playing = true;
+  const ch = state.novel.chapters.find(c => c.id === state.entryChapter);
+  if (ch) $('playChapterTitle').textContent = ch.title;
+  $('playRole').textContent = `身份：${state.selectedRole || '-'}`;
+  gotoStep('step-play');
+  renderHistory(); renderSideProgress(); renderMemoryPanel(); renderStatePanel();
+  saveProgress();
+  toast(`📖 已读取存档：${b.name}`);
+}
+
+async function deleteBranch(id) {
+  state.branches = state.branches.filter(x => x.id !== id);
+  await DB.delete(PN_STORE.saves, id);
+  renderTimeline();
+}
+
+/* ============================================================
+ * P1-10 导出与分享
+ * ============================================================ */
+function exportMarkdown() {
+  if (!state.novel) return toast('尚未加载小说');
+  const lines = [];
+  lines.push(`# ${state.novel.title || '未命名故事'} · 互动实录`);
+  lines.push('');
+  lines.push(`> 由 Playable Novel 可玩小说引擎生成 · ${new Date().toLocaleString('zh-CN')}`);
+  lines.push(`> 身份：${state.selectedRole || '-'} · 入口：${(state.novel.chapters.find(c => c.id === state.entryChapter) || {}).title || '-'} · 回合数：${state.turn}`);
+  lines.push('');
+  if (state.world) { lines.push('## 世界卡片', '', state.world, ''); }
+  if (state.factList) { lines.push('## 已确立事实', '', state.factList, ''); }
+  lines.push('## 故事实录', '');
+  state.history.forEach(h => {
+    if (h.role === 'user') lines.push(`### 🗡 你的行动`, '', h.content, '');
+    else lines.push(`### 📖 剧情`, '', h.content, '');
+  });
+  if (state.charState) {
+    lines.push('## 终局状态', '', `- 位置：${state.charState.location || '未知'}`);
+    if ((state.charState.items || []).length) lines.push(`- 物品：${state.charState.items.join('、')}`);
+    if ((state.charState.foreshadowing || []).length) lines.push(`- 未解伏笔：${state.charState.foreshadowing.join('；')}`);
+  }
+  downloadFile(`${state.novel.title || 'story'}-互动实录.md`, lines.join('\n'), 'text/markdown');
+  toast('📄 Markdown 故事书已导出');
+}
+
+function exportJson() {
+  const data = {
+    app: 'playable-novel', version: 1,
+    exportedAt: new Date().toISOString(),
+    novel: { title: state.novel.title, chapters: state.novel.chapters.map(c => ({ id: c.id, title: c.title, preview: c.preview })), fullText: state.novel.fullText },
+    world: state.world,
+    selectedRole: state.selectedRole,
+    entryChapter: state.entryChapter,
+    history: state.history,
+    events: state.events,
+    rollingSummary: state.rollingSummary,
+    summarizedTurns: state.summarizedTurns,
+    factList: state.factList,
+    charState: state.charState,
+    turn: state.turn,
+    worldbook: state.worldbook,
+    usage: state.usage
+  };
+  downloadFile(`${state.novel.title || 'story'}-存档.json`, JSON.stringify(data, null, 2), 'application/json');
+  toast('🗃 JSON 存档已导出');
+}
+
+function exportShareLink() {
+  if (!state.history.length) return toast('先开始一段故事再分享');
+  // 轻量分享包：世界卡片 + 剧情 + 身份（不含原文全文，控制 URL 长度）
+  const payload = {
+    t: state.novel.title, w: (state.world || '').slice(0, 2000),
+    r: state.selectedRole, c: (state.novel.chapters.find(c => c.id === state.entryChapter) || {}).title,
+    h: state.history.slice(-30).map(h => [h.role, h.content.slice(0, 500)])
+  };
+  const json = JSON.stringify(payload);
+  const b64 = btoa(unescape(encodeURIComponent(json)));
+  const url = location.origin + location.pathname + '#share=' + encodeURIComponent(b64);
+  $('shareLinkBox').style.display = '';
+  $('shareLinkText').value = url;
+  navigator.clipboard.writeText(url).then(() => toast('🔗 分享链接已复制'), () => toast('链接已生成，请手动复制'));
+}
+
+function downloadFile(filename, content, mime) {
+  const blob = new Blob([content], { type: mime + ';charset=utf-8' });
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 1000);
+}
+
+/* ============================================================
+ * P1-9 场景插画（可选，默认关闭）
+ * ============================================================ */
+const IMAGE_PRESETS = {
+  none:      { label: '关闭' },
+  pollinations: { label: 'Pollinations（免费无需 Key）', url: 'https://image.pollinations.ai/prompt/{prompt}?width=768&height=432&nologo=true', keyless: true },
+  openai:    { label: 'OpenAI DALL·E 3', endpoint: 'https://api.openai.com/v1/images/generations', model: 'dall-e-3' },
+  openrouter: { label: 'OpenRouter（flux/sd）', endpoint: 'https://openrouter.ai/api/v1/images/generations', model: 'black-forest-labs/flux-schnell' },
+  sdlocal:   { label: 'SD 本地（Automatic1111）', endpoint: 'http://127.0.0.1:7860/sdapi/v1/txt2img', model: '' }
+};
+
+async function genSceneImage(narration, msgEl) {
+  const provider = state.config.imageProvider;
+  if (!provider || provider === 'none') return;
+  if (!narration || narration.length < 30) return;
+
+  // 缓存键：剧情内容哈希
+  const cacheKey = 'img_' + hashStr(narration.slice(0, 120));
+  const cached = await DB.get(PN_STORE.gallery, cacheKey);
+  if (cached) { renderSceneImage(msgEl, cached); return; }
+
+  const prompt = `anime style scene illustration, cinematic lighting: ${narration.slice(0, 200)}`;
+  try {
+    let imgUrl = '';
+    const p = IMAGE_PRESETS[provider];
+    if (p.keyless) {
+      imgUrl = p.url.replace('{prompt}', encodeURIComponent(prompt));
+      // 预热：确认可加载
+      await preloadImage(imgUrl);
+    } else {
+      const resp = await fetch(p.endpoint, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + (state.config.imageApiKey || '') },
+        body: JSON.stringify({ model: p.model, prompt, n: 1, size: '1024x576' })
+      });
+      const data = await resp.json();
+      if (!resp.ok) throw new Error(data.error && data.error.message || ('HTTP ' + resp.status));
+      imgUrl = data.data && data.data[0] && (data.data[0].url || (data.data[0].b64_json && ('data:image/png;base64,' + data.data[0].b64_json)));
+    }
+    if (!imgUrl) throw new Error('未获取到图片');
+    await DB.set(PN_STORE.gallery, cacheKey, imgUrl);
+    renderSceneImage(msgEl, imgUrl);
+  } catch (e) {
+    console.warn('插画生成失败:', e.message);
+  }
+}
+
+function renderSceneImage(msgEl, url) {
+  if (!msgEl || msgEl.querySelector('.scene-img')) return;
+  const wrap = document.createElement('div');
+  wrap.className = 'scene-img';
+  const img = document.createElement('img');
+  img.src = url;
+  img.alt = '场景插画';
+  img.loading = 'lazy';
+  wrap.appendChild(img);
+  msgEl.appendChild(wrap);
+  scrollBottom();
+}
+
+function preloadImage(url) {
+  return new Promise((resolve, reject) => {
+    const img = new Image();
+    img.onload = resolve;
+    img.onerror = () => reject(new Error('图片加载失败'));
+    img.src = url;
+    setTimeout(reject, 20000);
+  });
+}
+
+function hashStr(s) {
+  let h = 0;
+  for (let i = 0; i < s.length; i++) { h = ((h << 5) - h + s.charCodeAt(i)) | 0; }
+  return (h >>> 0).toString(36);
+}
+
+/* ============================================================
+ * AI 调用（三通道：Node 代理 / 浏览器直连 / 本地演示引擎）
  * 返回 { content, usage }
  * ============================================================ */
 async function callAI(messages, temperature = 0.8, maxTokens = 800, mockAction = 'narrate', mockUserText = '') {
   if (hasLiveKey()) {
-    const resp = await fetch('/api/ai/chat', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        baseUrl: state.config.baseUrl,
-        apiKey: state.config.apiKey,
-        model: state.config.model,
-        messages, temperature, maxTokens
-      })
-    });
-    const data = await resp.json();
-    if (!resp.ok) throw new Error(data.error || ('HTTP ' + resp.status));
-    return { content: data.content, usage: data.usage };
+    // 优先走 Node 代理（规避 CORS、Key 不暴露在页面网络面板）
+    if (BACKEND_OK !== false) {
+      try {
+        const resp = await fetch('/api/ai/chat', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            baseUrl: state.config.baseUrl,
+            apiKey: state.config.apiKey,
+            model: state.config.model,
+            messages, temperature, maxTokens
+          })
+        });
+        const data = await resp.json();
+        if (!resp.ok) throw new Error(data.error || ('HTTP ' + resp.status));
+        return { content: data.content, usage: data.usage };
+      } catch (e) {
+        if (BACKEND_OK === true) { BACKEND_OK = false; toast('后端不可用，已切换本地直连模式'); }
+        // 落到浏览器直连
+        return directCallAI(messages, temperature, maxTokens);
+      }
+    }
+    return directCallAI(messages, temperature, maxTokens);
   }
-  // 演示模式
-  return mockGenerate(messages, mockAction, mockUserText);
+  // 演示模式：本地引擎优先，无后端时也能跑
+  return localMock(mockAction, mockUserText);
+}
+
+/* 浏览器直连 OpenAI 兼容接口（本地 HTML 模式；需服务商支持 CORS） */
+async function directCallAI(messages, temperature, maxTokens) {
+  const url = state.config.baseUrl.replace(/\/+$/, '') + '/chat/completions';
+  const resp = await fetch(url, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'Authorization': 'Bearer ' + state.config.apiKey
+    },
+    body: JSON.stringify({ model: state.config.model, messages, temperature, max_tokens: maxTokens })
+  });
+  const data = await resp.json();
+  if (!resp.ok) throw new Error(data.error && data.error.message ? data.error.message : ('上游接口错误 ' + resp.status));
+  const content = data.choices && data.choices[0] && data.choices[0].message ? data.choices[0].message.content : '';
+  return { content, usage: data.usage };
 }
 
 /* 构造演示模式请求体（流式/非流式共用） */
@@ -830,14 +1411,40 @@ function buildMockBody(mockAction = 'narrate', mockUserText = '') {
   return {
     action: mockAction,
     context: { text: state.novel ? state.novel.fullText.slice(0, 20000) : '' },
-    world: { name: guessWorldName(), protagonist: state.selectedRole, style: guessWorldStyle() },
+    world: {
+      name: guessWorldName(),
+      protagonist: state.selectedRole,
+      style: guessWorldStyle(),
+      characters: state.characters.map(c => c.name)
+    },
     userInput: mockUserText,
     chapterTitle: (state.novel && state.novel.chapters[state.entryChapter] || {}).title,
     history: state.history
   };
 }
 
+/* 本地演示引擎（mock-engine.js），无后端时使用 */
+function localMock(mockAction = 'narrate', mockUserText = '') {
+  const body = buildMockBody(mockAction, mockUserText);
+  const content = mockAction === 'summarize'
+    ? MockEngine.summarize(body)
+    : MockEngine.narrate(body);
+  return {
+    content,
+    usage: {
+      prompt_tokens: Math.ceil(JSON.stringify(body).length / 2),
+      completion_tokens: Math.ceil(content.length / 2),
+      mock: true
+    }
+  };
+}
+
+/* 旧 mockGenerate 保留兼容（内部转调 localMock） */
 async function mockGenerate(messages, mockAction = 'narrate', mockUserText = '') {
+  if (BACKEND_OK === false) {
+    await sleep(300 + Math.random() * 400);
+    return localMock(mockAction, mockUserText);
+  }
   const resp = await fetch('/api/ai/mock', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -845,9 +1452,7 @@ async function mockGenerate(messages, mockAction = 'narrate', mockUserText = '')
   });
   const data = await resp.json();
   if (!resp.ok) throw new Error(data.error || '演示生成失败');
-  // 模拟网络延迟，增强真实感
   await sleep(300 + Math.random() * 400);
-  // 演示模式模拟 usage，让成本面板有数据可看
   return {
     content: data.content,
     usage: {
@@ -899,8 +1504,44 @@ ${head.slice(0, 60)}……
 （配置 API Key 后，AI 将在这里深度解析原著的伏笔与冲突。当前为演示模式，先随意体验流程吧！）`;
 }
 
+/* P1-6：给某条剧情消息打上冲突警告（标黄 + 横幅 + 重写/接受） */
+function markCanonWarning(hid, reason) {
+  const h = state.history.find(x => x.id === hid);
+  if (!h) return;
+  h.canonWarn = reason;
+  const el = $('storyFlow').querySelector(`[data-hid="${hid}"]`);
+  if (!el) return;
+  el.classList.add('canon-warn');
+  const banner = document.createElement('div');
+  banner.className = 'canon-banner';
+  banner.innerHTML = `<span>⚠️ 可能与已确立事实冲突：${escapeHtml(reason)}</span>`;
+  const btnRewrite = document.createElement('button');
+  btnRewrite.className = 'btn small';
+  btnRewrite.textContent = '🔄 重写此段';
+  btnRewrite.onclick = () => {
+    banner.remove();
+    el.classList.remove('canon-warn');
+    rewriteAiMessage(hid);
+  };
+  const btnAccept = document.createElement('button');
+  btnAccept.className = 'btn small ghost';
+  btnAccept.textContent = '✓ 接受此段';
+  btnAccept.onclick = () => {
+    banner.remove();
+    el.classList.remove('canon-warn');
+    delete h.canonWarn;
+    // 接受即成为新事实：追加进事实清单
+    state.factList = (state.factList ? state.factList + '\n' : '') + '- （玩家接受）' + h.content.slice(0, 80);
+    saveProgress();
+    toast('已接受该段并记入事实清单');
+  };
+  banner.append(btnRewrite, btnAccept);
+  el.appendChild(banner);
+  saveProgress();
+}
+
 /* ============================================================
- * 消息渲染（含 P0-3 操作栏 / P0-2 流式）
+ * 消息渲染（含 P0-3 操作栏 / P0-2 流式 / P1-6 冲突横幅）
  * ============================================================ */
 
 /* 创建一条流式占位消息，返回 { el, body } */
@@ -955,7 +1596,7 @@ function renderFinalMessage(el, body, narration, suggestions, mode) {
 }
 
 /* P0-3：消息操作栏（悬停显示） */
-function buildMsgOps(el, kind) {
+function buildMsgOps(el, kind, hid) {
   const ops = document.createElement('div');
   ops.className = 'msg-ops';
   if (kind === 'user') {
@@ -964,6 +1605,21 @@ function buildMsgOps(el, kind) {
     edit.title = '编辑这条行动，并基于新输入重写后续剧情';
     edit.onclick = () => editUserMessage(el);
     ops.appendChild(edit);
+  } else if (kind === 'canon') {
+    const rw = document.createElement('button');
+    rw.textContent = '🔄 重写此段';
+    rw.onclick = () => { el.classList.remove('canon-warn'); const b = el.querySelector('.canon-banner'); if (b) b.remove(); rewriteAiMessage(hid); };
+    ops.appendChild(rw);
+    const ok = document.createElement('button');
+    ok.textContent = '✓ 接受';
+    ok.onclick = () => {
+      el.classList.remove('canon-warn');
+      const b = el.querySelector('.canon-banner'); if (b) b.remove();
+      const h = state.history.find(x => x.id === hid);
+      if (h) { delete h.canonWarn; state.factList = (state.factList ? state.factList + '\n' : '') + '- （玩家接受）' + h.content.slice(0, 80); saveProgress(); }
+      toast('已接受该段并记入事实清单');
+    };
+    ops.appendChild(ok);
   } else {
     const rw = document.createElement('button');
     rw.textContent = '🔄 重写';
@@ -980,10 +1636,10 @@ function buildMsgOps(el, kind) {
   return ops;
 }
 
-function addNarration(text, suggestions, hid) {
+function addNarration(text, suggestions, hid, canonWarn) {
   const flow = $('storyFlow');
   const el = document.createElement('div');
-  el.className = 'msg narration';
+  el.className = 'msg narration' + (canonWarn ? ' canon-warn' : '');
   el.dataset.hid = hid;
   el.innerHTML = `<span class="msg-tag">◈ 剧情续写</span><div class="msg-body">${escapeHtml(text).replace(/\n/g, '<br>')}</div>`;
   if (suggestions && suggestions.length) {
@@ -998,7 +1654,16 @@ function addNarration(text, suggestions, hid) {
     });
     el.appendChild(chips);
   }
-  el.appendChild(buildMsgOps(el, 'ai'));
+  if (canonWarn) {
+    const banner = document.createElement('div');
+    banner.className = 'canon-banner';
+    banner.innerHTML = `<span>⚠️ 可能与已确立事实冲突：${escapeHtml(canonWarn)}</span>`;
+    banner.appendChild(buildMsgOps(el, 'canon', hid));
+    el.appendChild(banner);
+    // 有冲突横幅时不再附加常规操作栏（横幅内已含重写/接受/回溯）
+  } else {
+    el.appendChild(buildMsgOps(el, 'ai'));
+  }
   flow.appendChild(el);
   scrollBottom();
 }
@@ -1084,7 +1749,11 @@ async function saveProgress() {
       turn: state.turn,
       rollingSummary: state.rollingSummary,
       summarizedTurns: state.summarizedTurns,
-      usage: state.usage
+      usage: state.usage,
+      charState: state.charState,
+      factList: state.factList,
+      lastFactTurn: state.lastFactTurn,
+      lastCanonCheck: state.lastCanonCheck || 0
     });
   } catch (e) { console.warn('保存进度失败:', e.message); }
 }
@@ -1103,10 +1772,14 @@ async function restoreProgress() {
     state.rollingSummary = (s && s.rollingSummary) || '';
     state.summarizedTurns = (s && s.summarizedTurns) || 0;
     state.usage = (s && s.usage) || { promptTokens: 0, completionTokens: 0, calls: 0 };
+    state.charState = (s && s.charState) || null;
+    state.factList = (s && s.factList) || '';
+    state.lastFactTurn = (s && s.lastFactTurn) || 0;
+    state.lastCanonCheck = (s && s.lastCanonCheck) || 0;
     // 兼容旧数据：补齐消息 id
     state.history.forEach(h => { if (h.id == null) h.id = nextHid(); });
     _hidSeq = state.history.reduce((m, h) => Math.max(m, h.id || 0), 0) + 1;
-    renderSideWorld(); renderSideProgress(); renderMemoryPanel(); renderUsagePanel();
+    renderSideWorld(); renderSideProgress(); renderMemoryPanel(); renderStatePanel(); renderUsagePanel();
     if (state.world) {
       $('worldCard').classList.remove('loading');
       $('worldCard').textContent = state.world;

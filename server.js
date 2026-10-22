@@ -192,10 +192,20 @@ function mockNarrate({ context, world, userInput, chapterTitle }) {
     `保持警惕，继续向前`,
     `回忆原著中关于此地的记载`
   ];
+  // 演示模式模拟结构化角色状态（与前端引擎协议一致）
+  const chars = (world && world.characters && world.characters.length) ? world.characters.slice(0, 2) : ['苏璃', '神秘的黑袍人'];
+  const state = {
+    location: (world && world.name) || '未知之地',
+    present: chars,
+    relations: { [(world && world.protagonist) || '你']: '命运共同体' },
+    items: ['手背上的淡金印记', '一张烫金名片'],
+    foreshadowing: ['海底古城的传闻', '「叛序者」之名']
+  };
   return {
     narration,
     suggestions: shuffle(suggestions).slice(0, 3),
-    mood: pick(['紧张', '平静', '诡谲', '激昂', '期待'])
+    mood: pick(['紧张', '平静', '诡谲', '激昂', '期待']),
+    state
   };
 }
 

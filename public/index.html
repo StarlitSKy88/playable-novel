@@ -101,6 +101,8 @@
           </div>
           <div class="stage-head-actions">
             <button id="btnStop" class="btn small ghost" style="display:none">⏹ 停止生成</button>
+            <button id="btnWorldbook" class="btn small ghost">📚 世界书</button>
+            <button id="btnExport" class="btn small ghost">📤 导出</button>
             <button id="btnEnding" class="btn small ghost">🏁 生成结局</button>
             <button id="btnRestart" class="btn small ghost">↺ 重开本局</button>
           </div>
@@ -132,6 +134,19 @@
         <div id="sideMemory" class="side-empty">尚无摘要 · 近期对话将逐字保留</div>
       </div>
       <div class="side-block">
+        <h4>🎭 角色状态 <span class="side-hint" id="stateMeta"></span></h4>
+        <div id="sideState" class="side-empty">尚未开始 · 进入故事后展示位置/关系/物品</div>
+      </div>
+      <div class="side-block">
+        <h4>📚 世界书 <span class="side-hint" id="worldbookMeta"></span></h4>
+        <div id="sideWorldbook" class="side-empty">从世界卡片自动提炼，或手动添加设定条目</div>
+        <button id="btnWorldbookSide" class="btn small ghost wb-open">管理世界书</button>
+      </div>
+      <div class="side-block">
+        <h4>🕰 分支时间线 <span class="side-hint" id="timelineMeta"></span></h4>
+        <div class="timeline-list" id="timelineList"><div class="side-empty">尚无存档 · 剧情推进中自动创建快照</div></div>
+      </div>
+      <div class="side-block">
         <h4>💰 成本统计</h4>
         <div id="sideUsage" class="side-empty">尚未产生调用</div>
       </div>
@@ -146,6 +161,7 @@
           <li>选择章节入口与扮演角色</li>
           <li>自由输入行动，剧情实时续写</li>
           <li>悬停消息可编辑 / 重写 / 回溯</li>
+          <li>世界书可锁定关键设定，防止 AI 跑偏</li>
           <li>配置 API Key 后使用真实大模型</li>
         </ul>
       </div>
@@ -187,6 +203,23 @@
             <span>流式输出（打字机效果；关闭可提升 prompt 缓存命中、更省钱）</span>
           </label>
         </div>
+        <div class="settings-section">
+          <label>🎨 场景插画（可选，默认关闭）</label>
+          <div class="preset-row">
+            <button class="chip" data-img="none">关闭</button>
+            <button class="chip" data-img="pollinations">Pollinations 免费</button>
+            <button class="chip" data-img="openai">DALL·E 3</button>
+            <button class="chip" data-img="openrouter">OpenRouter flux</button>
+            <button class="chip" data-img="sdlocal">SD 本地</button>
+          </div>
+          <input id="cfgImageKey" type="password" placeholder="图像 API Key（Pollinations / SD 本地留空）" style="margin-top:8px" />
+          <p class="modal-desc" style="margin-top:6px">开启后每个场景自动生成一张插画（缓存到本地 IndexedDB，不重复消耗）</p>
+        </div>
+        <div class="settings-section local-mode-tip" id="localModeTip" style="display:none">
+          <b>💻 本地直用模式</b><br />
+          未检测到 Node 后端：当前以纯静态页面运行，演示引擎已内置；配置 Key 后将由浏览器直连 API（需服务商支持 CORS）。<br />
+          完整体验请运行 <code>npm start</code>。
+        </div>
       </div>
       <div class="modal-foot">
         <button id="btnSaveSettings" class="btn primary">保存设置</button>
@@ -195,10 +228,85 @@
     </div>
   </div>
 
+  <!-- ========== 世界书弹窗 ========== -->
+  <div class="modal-mask" id="worldbookModal">
+    <div class="modal modal-wide">
+      <div class="modal-head">
+        <h3>📚 世界书 · 设定锁定</h3>
+        <button class="modal-close" id="btnCloseWorldbook">✕</button>
+      </div>
+      <div class="modal-body">
+        <p class="modal-desc">世界书条目会注入每次生成：<b>常驻条目</b>始终生效，<b>触发条目</b>在对话命中关键词时生效。AI 不得违背已锁定的设定。</p>
+        <div class="row gap wb-actions">
+          <button id="btnWbAutoExtract" class="btn small">✨ 从世界卡片自动提炼</button>
+          <span class="wb-count" id="wbCount"></span>
+        </div>
+        <div class="wb-list" id="wbList"></div>
+        <div class="wb-add">
+          <h4>＋ 手动添加条目</h4>
+          <div class="wb-add-row">
+            <select id="wbNewType">
+              <option value="character">人物</option>
+              <option value="location">地点</option>
+              <option value="item">物品</option>
+              <option value="rule">规则</option>
+              <option value="foreshadow">伏笔</option>
+            </select>
+            <input id="wbNewName" type="text" placeholder="名称，如：苏璃" />
+          </div>
+          <textarea id="wbNewContent" placeholder="设定内容，如：监察会三年生，银色短发灰眸，佩剑「霜纹」，对主角抱有戒心"></textarea>
+          <div class="wb-add-row">
+            <select id="wbNewMode">
+              <option value="always">常驻生效</option>
+              <option value="keyword">关键词触发</option>
+            </select>
+            <input id="wbNewKeywords" type="text" placeholder="触发词（逗号分隔），如：苏璃,监察会" />
+            <button id="btnWbAdd" class="btn small primary">添加</button>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ========== 导出弹窗 ========== -->
+  <div class="modal-mask" id="exportModal">
+    <div class="modal">
+      <div class="modal-head">
+        <h3>📤 导出与分享</h3>
+        <button class="modal-close" id="btnCloseExport">✕</button>
+      </div>
+      <div class="modal-body">
+        <p class="modal-desc">你的故事永远属于你。所有导出均在本地完成，不经过任何服务器。</p>
+        <div class="export-grid">
+          <button id="btnExportMd" class="export-card">
+            <span class="export-icon">📄</span>
+            <b>Markdown 故事书</b>
+            <small>世界卡片 + 完整剧情 + 你的每个选择</small>
+          </button>
+          <button id="btnExportJson" class="export-card">
+            <span class="export-icon">🗃</span>
+            <b>JSON 存档</b>
+            <small>完整进度（含记忆体/世界书/分支），可再次导入</small>
+          </button>
+          <button id="btnExportShare" class="export-card">
+            <span class="export-icon">🔗</span>
+            <b>分享链接</b>
+            <small>压缩编码进 URL，发给朋友直接体验你的故事线</small>
+          </button>
+        </div>
+        <div id="shareLinkBox" class="share-link-box" style="display:none">
+          <label>分享链接（已复制到剪贴板）</label>
+          <textarea id="shareLinkText" readonly rows="3"></textarea>
+        </div>
+      </div>
+    </div>
+  </div>
+
   <!-- Toast -->
   <div class="toast" id="toast"></div>
 
   <script src="storage.js"></script>
+  <script src="mock-engine.js"></script>
   <script src="app.js"></script>
 </body>
 </html>

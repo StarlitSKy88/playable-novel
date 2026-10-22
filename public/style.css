@@ -437,7 +437,7 @@ body {
 .usage-row { display: flex; justify-content: space-between; }
 .usage-note { font-size: 11px; color: var(--text-dim); margin-top: 6px; }
 
-/* ---- 分支时间线（P1-7 预留样式） ---- */
+/* ---- 分支时间线（P1-7） ---- */
 .timeline-list { display: flex; flex-direction: column; gap: 6px; max-height: 220px; overflow-y: auto; }
 .timeline-item {
   font-size: 12px; padding: 7px 10px;
@@ -448,3 +448,118 @@ body {
 .timeline-item:hover { border-color: var(--accent); color: var(--text); }
 .timeline-item.current { border-color: var(--accent-2); color: var(--text); }
 .timeline-item small { display: block; font-size: 10px; opacity: .7; margin-top: 2px; }
+
+/* ============================================================
+ * P1 新增：世界书 / 角色状态 / 导出 / 插画 / 本地模式
+ * ============================================================ */
+
+/* ---- 侧边栏：世界书迷你卡 ---- */
+.wb-open { width: 100%; margin-top: 8px; }
+.wb-mini { font-size: 12px; line-height: 1.8; }
+.wb-mini-item { padding: 2px 0; color: var(--text-dim); }
+.wb-mini-more { font-size: 11px; opacity: .7; margin-top: 2px; }
+.wb-tag {
+  display: inline-block; font-size: 10px; padding: 1px 7px;
+  border-radius: 99px; margin-right: 6px; vertical-align: 1px;
+  border: 1px solid var(--border);
+}
+.wb-tag-character { color: #a78bfa; border-color: rgba(167, 139, 250, .4); }
+.wb-tag-location   { color: #34d399; border-color: rgba(52, 211, 153, .4); }
+.wb-tag-item       { color: #fbbf24; border-color: rgba(251, 191, 36, .4); }
+.wb-tag-rule       { color: #60a5fa; border-color: rgba(96, 165, 250, .4); }
+.wb-tag-foreshadow { color: #f472b6; border-color: rgba(244, 114, 182, .4); }
+
+/* ---- 侧边栏：角色状态面板 ---- */
+.state-panel { font-size: 12px; line-height: 1.8; }
+.state-row { padding: 3px 0; display: flex; gap: 8px; }
+.state-k { flex-shrink: 0; color: var(--text-dim); }
+.state-rels { display: flex; flex-wrap: wrap; gap: 6px; }
+.state-rel {
+  font-size: 11px; padding: 1px 8px; border-radius: 99px;
+  background: var(--panel-2); border: 1px solid var(--border);
+}
+.state-rel b { color: var(--accent-2); margin-right: 4px; font-weight: 600; }
+
+/* ---- 世界书弹窗 ---- */
+.modal-wide { width: min(680px, 94vw); }
+.wb-actions { align-items: center; margin-bottom: 14px; }
+.wb-count { font-size: 12px; color: var(--text-dim); }
+.wb-list { display: flex; flex-direction: column; gap: 8px; max-height: 300px; overflow-y: auto; margin-bottom: 18px; }
+.wb-empty { font-size: 13px; color: var(--text-dim); text-align: center; padding: 24px 0; border: 1px dashed var(--border); border-radius: 10px; }
+.wb-item {
+  border: 1px solid var(--border); border-radius: 10px;
+  background: var(--bg-soft); padding: 10px 14px;
+}
+.wb-item.disabled { opacity: .45; }
+.wb-item-head { display: flex; align-items: center; gap: 8px; font-size: 14px; }
+.wb-item-head b { flex: 1; }
+.wb-mode { font-size: 10px; color: var(--text-dim); border: 1px solid var(--border); padding: 1px 7px; border-radius: 99px; }
+.wb-item-ops { display: flex; gap: 4px; }
+.wb-op {
+  background: none; border: none; cursor: pointer;
+  color: var(--text-dim); font-size: 12px; padding: 2px 6px;
+  border-radius: 5px; font-family: inherit;
+}
+.wb-op:hover { background: var(--panel-2); color: var(--text); }
+.wb-op.danger:hover { color: #f87171; }
+.wb-item-content { font-size: 12px; color: var(--text-dim); line-height: 1.7; margin-top: 6px; }
+.wb-item-kw { font-size: 11px; color: var(--accent); margin-top: 4px; }
+.wb-add { border-top: 1px solid var(--border); padding-top: 14px; }
+.wb-add h4 { font-size: 13px; margin-bottom: 10px; color: var(--text-dim); }
+.wb-add-row { display: flex; gap: 8px; margin-bottom: 8px; }
+.wb-add-row select, .wb-add-row input {
+  background: var(--bg-soft); border: 1px solid var(--border);
+  border-radius: 8px; padding: 8px 12px; color: var(--text); font-size: 13px;
+  font-family: inherit;
+}
+.wb-add-row select { flex-shrink: 0; }
+.wb-add-row input { flex: 1; min-width: 0; }
+.wb-add textarea {
+  width: 100%; min-height: 64px; resize: vertical;
+  background: var(--bg-soft); border: 1px solid var(--border);
+  border-radius: 8px; padding: 10px 12px; color: var(--text);
+  font-size: 13px; font-family: inherit; line-height: 1.6;
+}
+.wb-add textarea:focus, .wb-add-row input:focus, .wb-add-row select:focus { outline: none; border-color: var(--accent); }
+
+/* ---- 导出弹窗 ---- */
+.export-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; margin-top: 14px; }
+@media (max-width: 560px) { .export-grid { grid-template-columns: 1fr; } }
+.export-card {
+  display: flex; flex-direction: column; align-items: center; gap: 6px;
+  padding: 20px 12px; text-align: center;
+  background: var(--bg-soft); border: 1px solid var(--border);
+  border-radius: 12px; cursor: pointer; color: var(--text);
+  transition: all .18s; font-family: inherit;
+}
+.export-card:hover { border-color: var(--accent); transform: translateY(-2px); }
+.export-icon { font-size: 26px; }
+.export-card b { font-size: 14px; }
+.export-card small { font-size: 11px; color: var(--text-dim); line-height: 1.5; }
+.share-link-box { margin-top: 14px; }
+.share-link-box label { display: block; font-size: 12px; color: var(--good); margin-bottom: 6px; }
+.share-link-box textarea {
+  width: 100%; background: var(--bg-soft); border: 1px solid var(--border);
+  border-radius: 8px; padding: 10px; color: var(--text-dim);
+  font-size: 11px; font-family: monospace; resize: none;
+}
+
+/* ---- 场景插画 ---- */
+.scene-img { margin-top: 14px; border-radius: 10px; overflow: hidden; border: 1px solid var(--border); }
+.scene-img img { display: block; width: 100%; height: auto; }
+
+/* ---- 设置区 ---- */
+.settings-section { margin-top: 18px; border-top: 1px solid var(--border); padding-top: 14px; }
+.settings-section > label { display: block; font-size: 13px; color: var(--text-dim); margin-bottom: 8px; }
+.chip.active { border-color: var(--accent); color: var(--accent); background: rgba(139, 92, 246, .12); }
+.local-mode-tip {
+  font-size: 12px; line-height: 1.8; color: var(--text-dim);
+  background: rgba(52, 211, 153, .07);
+  border: 1px dashed rgba(52, 211, 153, .35);
+  border-radius: 10px; padding: 12px 14px;
+}
+.local-mode-tip b { color: var(--good); }
+.local-mode-tip code {
+  background: var(--bg-soft); padding: 1px 6px; border-radius: 4px;
+  font-size: 11px; color: var(--accent);
+}
