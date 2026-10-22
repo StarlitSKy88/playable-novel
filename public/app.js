@@ -25,7 +25,9 @@ const state = {
   factList: '',             // P1-6 Canon Guard 原著事实清单
   lastFactTurn: 0,          // 上次生成事实清单的轮次
   lastCanonCheck: 0,        // 上次冲突检测的轮次
-  branchId: null            // P1-7 当前分支 id
+  branchId: null,          // P1-7 当前分支 id
+  sourceLang: null,        // P2-13 检测到的原著语言 { code, label, ratio }
+  outputLang: 'auto'       // P2-13 输出语言（auto = 跟随原著）
 };
 
 /* 后端可用性：null=未探测 true=可用 false=纯本地模式（无 Node 后端） */
@@ -143,6 +145,18 @@ function bindSettings() {
     };
   });
 
+  // P2-13 输出语言选择
+  const curLang = state.outputLang || 'auto';
+  document.querySelectorAll('.chip[data-lang]').forEach(x => {
+    x.classList.toggle('active', x.dataset.lang === curLang);
+    x.onclick = () => {
+      document.querySelectorAll('.chip[data-lang]').forEach(y => y.classList.remove('active'));
+      x.classList.add('active');
+      state.outputLang = x.dataset.lang;
+      updateLangHint();
+    };
+  });
+
   $('btnSaveSettings').onclick = async () => {
     await saveConfig({
       baseUrl: $('cfgBaseUrl').value.trim(),
@@ -151,7 +165,10 @@ function bindSettings() {
       useMock: $('cfgUseMock').checked,
       stream: $('cfgStream').checked,
       imageProvider: (document.querySelector('.chip[data-img].active') || {}).dataset ? (document.querySelector('.chip[data-img].active') || {}).dataset.img : 'none',
-      imageApiKey: $('cfgImageKey').value.trim()
+      imageApiKey: $('cfgImageKey').value.trim(),
+      outputLang: (document.querySelector('.chip[data-lang].active') || {}).dataset
+        ? (document.querySelector('.chip[data-lang].active') || {}).dataset.lang
+        : (state.outputLang || 'auto')
     });
     $('settingsModal').classList.remove('open');
     toast(hasLiveKey() ? '✅ 已连接真实大模型，开始你的故事吧' : '⚙️ 已保存，未配置 Key 时将使用演示模式');
@@ -187,17 +204,91 @@ function bindUpload() {
     parseNovel(text);
   };
   $('btnSample').onclick = () => parseNovel(SAMPLE_NOVEL, true);
+
+  // P2-11：角色卡导入入口
+  const cardBtn = $('btnCharacterCard');
+  const cardInput = $('cardInput');
+  if (cardBtn && cardInput) {
+    cardBtn.onclick = () => cardInput.click();
+    cardInput.onchange = e => { if (e.target.files[0]) importCharacterCardFile(e.target.files[0]); };
+  }
 }
 
-function readFile(file) {
-  if (file.size > 8 * 1024 * 1024) return toast('文件过大，请上传 8MB 以内的 txt');
-  const reader = new FileReader();
-  reader.onload = () => parseNovel(String(reader.result || ''));
-  reader.onerror = () => toast('文件读取失败');
-  reader.readAsText(file, 'utf-8');
+/* P2-12/13：按扩展名分派 TXT / EPUB / PDF；P2-11：PNG 走角色卡通道 */
+async function readFile(file) {
+  if (!file) return;
+  if (file.size > 24 * 1024 * 1024) return toast('文件过大，请控制在 24MB 以内');
+  const name = (file.name || '').toLowerCase();
+  const isEpub = name.endsWith('.epub');
+  const isPdf = name.endsWith('.pdf') || file.type === 'application/pdf';
+  const isPng = name.endsWith('.png') || file.type === 'image/png';
+
+  // PNG：交给角色卡导入
+  if (isPng) return importCharacterCardFile(file);
+
+  // 文本类
+  if (!isEpub && !isPdf) {
+    const reader = new FileReader();
+    reader.onload = () => parseNovel(String(reader.result || ''));
+    reader.onerror = () => toast('文件读取失败');
+    return reader.readAsText(file, 'utf-8');
+  }
+
+  // EPUB / PDF：读为 ArrayBuffer 后交给前端解析器
+  // P2-12 EPUB / P2-13：解析器带回书名（EPUB 来自 OPF metadata，比首行更准确）
+  toast(isEpub ? '📘 正在解析 EPUB…' : '📕 正在解析 PDF…');
+  const buf = await file.arrayBuffer();
+  try {
+    const r = isEpub ? await PNParser.parseEpub(buf) : await PNParser.parsePdf(buf);
+    if (!r.text || r.text.trim().length < 50) throw new Error('正文内容过少，可能不是可解析的文件');
+    toast(`✅ 已从${isEpub ? 'EPUB' : 'PDF'}提取 ${r.text.length.toLocaleString()} 字，正在切分章节…`);
+    parseNovel(r.text, false, r.title);
+  } catch (e) {
+    toast('解析失败：' + e.message);
+  }
 }
 
-async function parseNovel(text, isSample = false) {
+/* P2-11：SillyTavern 角色卡（PNG）→ 世界书条目 */
+async function importCharacterCardFile(file) {
+  toast('🎭 正在读取角色卡…');
+  try {
+    const buf = await file.arrayBuffer();
+    const card = PNParser.parseCharacterCardPNG(buf);
+    if (!card) {
+      return toast('这不是有效的角色卡 PNG（未找到 SillyTavern 内嵌数据）');
+    }
+    // 写入世界书（追加，不覆盖已有条目）
+    const entries = PNParser.characterCardToWorldbook(card).map((e, i) => ({
+      id: 'cc' + Date.now() + '_' + i,
+      type: e.type,
+      name: e.name,
+      content: e.content,
+      mode: e.type === 'character' ? 'always' : 'keyword',
+      keywords: e.type === 'character' ? [] : [e.name.replace(/ · .+$/, '')],
+      enabled: true,
+      source: 'character-card'
+    }));
+    state.worldbook = state.worldbook.concat(entries);
+    await saveWorldbook();
+    renderWorldbookList();
+    renderSideWorld();
+
+    // 同步侧边栏元信息
+    const meta = $('worldbookMeta');
+    if (meta) meta.textContent = `${state.worldbook.length} 条`;
+
+    toast(`✅ 已导入角色卡「${card.name}」，生成 ${entries.length} 条世界书设定`);
+    // 打开世界书弹窗让用户确认
+    openWorldbookModal();
+    if (card.firstMes) {
+      setTimeout(() => toast(`💡 「${card.name}」的开场白已作为设定导入，可在世界书里查看`), 2200);
+    }
+  } catch (e) {
+    toast('角色卡导入失败：' + e.message);
+  }
+}
+
+async function parseNovel(text, isSample = false, metaTitle = null) {
   toast('⚡ 正在解析章节结构……');
   let data;
   // 优先走后端；无后端（file:// 本地直用）时自动降级到前端引擎
@@ -231,14 +322,35 @@ async function parseNovel(text, isSample = false) {
   }
 
   state.novel = {
-    title: isSample ? '星海学院的转学生（内置示例）' : data.title,
+    title: isSample ? '星海学院的转学生（内置示例）' : (metaTitle || data.title),
     chapters: data.chapters,
     fullText: data.fullText || text
   };
+
+  // P2-13 语言自适应：检测原著语言
+  state.sourceLang = PNParser.detectLanguage(state.novel.fullText);
+  updateLangHint();
+
   renderSideWorld();
   gotoStep('step-world');
-  toast(`✅ 解析完成：共 ${data.totalChapters} 章 / ${(data.totalChars || 0).toLocaleString()} 字`);
+  toast(`✅ 解析完成：共 ${data.totalChapters} 章 / ${(data.totalChars || 0).toLocaleString()} 字 · 原著语言：${state.sourceLang.label}`);
   analyzeWorld();
+}
+
+/* P2-13：语言设置提示 */
+function updateLangHint() {
+  const hint = $('langHint');
+  if (!hint) return;
+  const src = state.sourceLang ? state.sourceLang.label : '未知';
+  const out = (PNParser.OUTPUT_LANGS.find(l => l.code === state.outputLang) || {}).label || '跟随原著';
+  hint.textContent = state.outputLang === 'auto'
+    ? `已识别原著语言：${src} · 剧情将以${src}续写`
+    : `原著：${src} · 剧情将以「${out}」叙述（跨语言扮演）`;
+}
+
+/** 语言约束（注入 prompt） */
+function langInstruction() {
+  return PNParser.languageInstruction(state.sourceLang && state.sourceLang.code, state.outputLang || 'auto');
 }
 
 /* ============================================================
@@ -535,7 +647,7 @@ async function startStory(chapterId) {
 严格遵循原著设定，第二人称「你」叙述。只输出正文，不要标题。`;
 
   const result = await runGeneration([
-    { role: 'system', content: STORY_SYSTEM_PROMPT },
+    { role: 'system', content: buildSystemPrompt() },
     { role: 'user', content: prompt }
   ], {
     temperature: 0.85, maxTokens: 500, mode: 'story',
@@ -608,7 +720,7 @@ ${actionText}
 严格遵循原著世界观，第二人称叙述。同时给出 3 个接下来的可选行动建议（JSON 输出）。`;
 
   const result = await runGeneration([
-    { role: 'system', content: STORY_SYSTEM_PROMPT },
+    { role: 'system', content: buildSystemPrompt() },
     { role: 'user', content: prompt }
   ], {
     temperature: 0.9, maxTokens: 600, mode: 'story',
@@ -974,17 +1086,31 @@ function renderMemoryPanel() {
 }
 
 /* ---------------- 提示词构造 ---------------- */
-const STORY_SYSTEM_PROMPT =
-`你是一部互动小说的「地下城主」（DM）。你的职责是基于原著设定，实时续写玩家行动之后的剧情。
+/* P2-13：系统提示词随输出语言动态生成 */
+function buildSystemPrompt() {
+  const lang = state.outputLang || 'auto';
+  const src = state.sourceLang ? state.sourceLang.code : 'zh';
+  // 非中文输出时给出对应语言的规则说明（JSON 键名保持不变，避免解析失败）
+  const i18n = {
+    zh: '使用第二人称「你」叙述玩家视角。',
+    en: 'Narrate in English, addressing the player as "you" in second person.',
+    ja: '日本語でナレーションし、二人称の「あなた」を使って語ってください。',
+    ko: '한국어로 서술하고, 2인칭「당신」을 사용해 주세요.'
+  };
+  const personRule = (lang !== 'auto' && i18n[lang]) ? i18n[lang]
+    : (src === 'en' ? i18n.en : src === 'ja' ? i18n.ja : src === 'ko' ? i18n.ko : i18n.zh);
+
+  return `你是一部互动小说的「地下城主」（DM）。你的职责是基于原著设定，实时续写玩家行动之后的剧情。
 铁律：
 1. 严格遵循给定的世界观、人物性格与人物关系，不得 OOC（角色崩坏）
-2. 使用第二人称「你」叙述玩家视角
+2. ${personRule}
 3. 文风贴合原著风格，注重画面感与情绪
 4. 玩家的行动必须有真实后果：世界会记住、人物会记住
 5. 不得违背「世界书」锁定设定与「已确立事实」
 6. 不要代替玩家做决定，只呈现世界的回应与新的局势
-默认以 JSON 输出：
+默认以 JSON 输出（键名固定为英文，不要翻译键名）：
 {"narration":"剧情正文","suggestions":["建议1","建议2","建议3"],"mood":"当前氛围","state":{"location":"当前位置","present":["在场人物"],"relations":{"人物":"关系描述"},"items":["持有物品"],"foreshadowing":["未解伏笔"]}}`;
+}
 
 function buildStoryPrompt(chapterText) {
   const parts = [`【世界设定】\n${state.world || '（未推演）'}`];
@@ -998,6 +1124,10 @@ function buildStoryPrompt(chapterText) {
   // P1-6 Canon Guard：已确立事实清单
   if (state.factList) {
     parts.push(`【已确立事实 · 不得违背】\n${state.factList}`);
+  }
+  // P2-13 语言自适应：输出语言约束
+  if (state.sourceLang) {
+    parts.push(langInstruction());
   }
   parts.push(`【原著参考（当前章节上下文）】\n${chapterText.slice(0, 4000)}`);
   return parts.join('\n\n');
@@ -1850,6 +1980,8 @@ async function saveProgress() {
       charState: state.charState,
       factList: state.factList,
       lastFactTurn: state.lastFactTurn,
+      sourceLang: state.sourceLang,
+      outputLang: state.outputLang,
       lastCanonCheck: state.lastCanonCheck || 0
     });
   } catch (e) { console.warn('保存进度失败:', e.message); }
@@ -1873,6 +2005,10 @@ async function restoreProgress() {
     state.factList = (s && s.factList) || '';
     state.lastFactTurn = (s && s.lastFactTurn) || 0;
     state.lastCanonCheck = (s && s.lastCanonCheck) || 0;
+    // P2-13 语言状态
+    state.sourceLang = (s && s.sourceLang) || (state.novel ? PNParser.detectLanguage(state.novel.fullText || '') : null);
+    state.outputLang = (s && s.outputLang) || state.config.outputLang || 'auto';
+    updateLangHint();
     // 兼容旧数据：补齐消息 id
     state.history.forEach(h => { if (h.id == null) h.id = nextHid(); });
     _hidSeq = state.history.reduce((m, h) => Math.max(m, h.id || 0), 0) + 1;

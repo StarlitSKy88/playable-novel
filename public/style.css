@@ -880,3 +880,23 @@ body {
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { animation-duration: 0.01ms !important; transition-duration: 0.01ms !important; }
 }
+
+/* ---- P2-11/12/13：格式标签、角色卡入口、语言提示 ---- */
+.dz-formats {
+  display: flex; gap: 6px; justify-content: center; flex-wrap: wrap; margin-top: 10px;
+}
+.dz-formats .fmt {
+  font-size: 10px; letter-spacing: .06em; padding: 3px 9px; border-radius: 999px;
+  border: 1px solid var(--border); color: var(--text-dim); background: rgba(255,255,255,.02);
+}
+.dz-formats .fmt.epub  { color: #7dd3fc; border-color: rgba(125,211,252,.3); }
+.dz-formats .fmt.pdf   { color: #fca5a5; border-color: rgba(252,165,165,.3); }
+.dz-formats .fmt.png   { color: #c4b5fd; border-color: rgba(196,181,253,.3); }
+.dz-formats .fmt.txt   { color: #86efac; border-color: rgba(134,239,172,.3); }
+
+.settings-hint {
+  font-size: 11px; line-height: 1.6; color: var(--text-dim);
+  margin: 8px 0 0; padding: 7px 10px;
+  border-left: 2px solid rgba(167,139,250,.4);
+  background: rgba(167,139,250,.05); border-radius: 0 6px 6px 0;
+}

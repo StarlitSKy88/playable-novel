@@ -64,9 +64,19 @@
             <div class="hero-sub">LEAVE THE SCRIPTS BEHIND · YOUR STORY BEGINS HERE</div>
           </div>
           <div class="dropzone" id="dropzone">
-            <span class="dz-icon">📄</span>
-            <p class="dz-main">拖拽 .txt 文件到此处，或 <label class="link">点击选择<input type="file" id="fileInput" accept=".txt,.md,.text" hidden /></label></p>
-            <p class="dz-sub">也可以直接粘贴小说全文 · 数据全程本地处理，不上传服务器</p>
+            <span class="dz-icon">📖</span>
+            <p class="dz-main">拖拽文件到此处，或 <label class="link">点击选择<input type="file" id="fileInput" accept=".txt,.md,.text,.epub,.pdf,.png,application/pdf,application/epub+zip" hidden /></label></p>
+            <p class="dz-sub">支持 TXT / Markdown / EPUB / PDF · PNG 角色卡 · 文件全程在浏览器内解析，不上传服务器</p>
+            <div class="dz-formats">
+              <span class="fmt txt">TXT</span>
+              <span class="fmt epub">EPUB</span>
+              <span class="fmt pdf">PDF</span>
+              <span class="fmt png">PNG 角色卡</span>
+            </div>
+          </div>
+          <div class="row gap">
+            <button id="btnCharacterCard" class="btn ghost">🎭 导入角色卡</button>
+            <input type="file" id="cardInput" accept=".png,image/png" hidden />
           </div>
           <div class="or-divider"><span>或</span></div>
           <textarea id="pasteArea" class="paste-area" placeholder="在此粘贴小说全文（建议 3000 字以上以获得更好体验）……"></textarea>
@@ -237,6 +247,17 @@
           </label>
         </div>
         <div class="settings-section">
+          <label>🌐 输出语言（P2-13 语言自适应）</label>
+          <div class="preset-row" id="langPresets">
+            <button class="chip" data-lang="auto">跟随原著</button>
+            <button class="chip" data-lang="zh">中文</button>
+            <button class="chip" data-lang="en">English</button>
+            <button class="chip" data-lang="ja">日本語</button>
+            <button class="chip" data-lang="ko">한국어</button>
+          </div>
+          <p class="settings-hint" id="langHint">自动识别原著语言并以同语言续写；也可指定用其他语言叙述（中文原著 + 英文扮演）</p>
+        </div>
+        <div class="settings-section">
           <label>🎨 场景插画（可选，默认关闭）</label>
           <div class="preset-row">
             <button class="chip" data-img="none">关闭</button>
@@ -340,6 +361,7 @@
 
   <script src="storage.js"></script>
   <script src="mock-engine.js"></script>
+  <script src="parsers.js"></script>
   <script src="app.js"></script>
   <script src="starfield.js"></script>
 </body>

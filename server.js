@@ -85,7 +85,11 @@ app.post('/api/novel/split', (req, res) => {
 });
 
 function guessTitle(text) {
-  const firstLine = text.split('\n').map(s => s.trim()).find(s => s.length > 1 && s.length < 40);
+  // 跳过章节标题行（第X章 / Chapter N / 序章…），避免把章节名当书名
+  const CH_TITLE = /^(第[0-9零一二三四五六七八九十百千]{1,9}[章回节卷部]|Chapter\s+\d+|序章|序子|终章|尾声|后记)/i;
+  const firstLine = text.split('\n')
+    .map(s => s.trim())
+    .find(s => s.length > 1 && s.length < 40 && !CH_TITLE.test(s));
   return firstLine || '未命名小说';
 }
 
