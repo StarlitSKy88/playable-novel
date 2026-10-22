@@ -11,7 +11,7 @@
   <meta property="og:image" content="media/plate.jpg" />
   <meta property="og:type" content="website" />
   <link rel="stylesheet" href="style.css" />
-  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>📖</text></svg>" />
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cpath fill='%23aab0e8' d='M6.5 2A2.5 2.5 0 0 0 4 4.5v15A2.5 2.5 0 0 0 6.5 22H20a1 1 0 0 0 1-1V5a1 1 0 0 0-1-1h-1V3a1 1 0 0 0-1-1H6.5ZM6 4.5a.5.5 0 0 1 .5-.5H17v14H6.5a2.49 2.49 0 0 0-.5.05V4.5Z'/%3E%3C/svg%3E" />
 </head>
 <body data-step="upload" class="booting">
   <!-- 氛围背景 -->
@@ -21,7 +21,9 @@
   <!-- 顶部导航 -->
   <header class="topbar">
     <div class="brand">
-      <span class="brand-logo">📖</span>
+      <span class="brand-logo" aria-hidden="true">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2Z"/></svg>
+      </span>
       <div class="brand-text">
         <h1>Playable Novel</h1>
         <span class="brand-sub">可玩小说引擎 · 你的每个决定都成为故事的一部分</span>
@@ -30,9 +32,11 @@
     <div class="topbar-actions">
       <span id="modeBadge" class="mode-badge demo">演示模式</span>
       <a class="star-btn" href="https://github.com/StarlitSKy88/playable-novel" target="_blank" rel="noopener" title="觉得不错？给个 Star 支持开源！">
-        <span class="star-icon">⭐</span>Star<span class="star-count" id="starCount"></span>
+        <span class="star-icon" aria-hidden="true">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg>
+        </span>Star<span class="star-count" id="starCount"></span>
       </a>
-      <button id="btnSettings" class="btn ghost">🔑 API 设置</button>
+      <button id="btnSettings" class="btn ghost">API 设置</button>
     </div>
   </header>
 
@@ -66,18 +70,27 @@
         每一个选择都会分叉出一条只属于你的故事线。
       </p>
       <div class="hero-cta">
-        <button class="hero-btn primary" id="heroStart">⚡ 开始解析我的小说</button>
-        <button class="hero-btn ghost" id="heroDemo">🎮 零配置试玩示例</button>
+        <button class="hero-btn primary" id="heroStart">开始解析我的小说</button>
+        <button class="hero-btn ghost" id="heroDemo">零配置试玩示例</button>
       </div>
-      <div class="hero-points">
-        <div class="hero-feature">
-          <span class="hf-icon">🧠</span><b>分层记忆</b><small>近期逐字 + 滚动摘要，长篇不失忆</small>
+      <div class="hero-points" role="list">
+        <div class="hero-feature" role="listitem">
+          <span class="hf-icon" aria-hidden="true">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="m12 3 9 5-9 5-9-5 9-5Z"/><path d="m3 13 9 5 9-5"/></svg>
+          </span>
+          <span class="hf-text"><b>分层记忆</b><small>近期逐字 + 滚动摘要，长篇不失忆</small></span>
         </div>
-        <div class="hero-feature">
-          <span class="hf-icon">📚</span><b>世界书锁定</b><small>Canon Guard 校验，设定不跑偏</small>
+        <div class="hero-feature" role="listitem">
+          <span class="hf-icon" aria-hidden="true">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2Z"/></svg>
+          </span>
+          <span class="hf-text"><b>世界书锁定</b><small>Canon Guard 校验，设定不跑偏</small></span>
         </div>
-        <div class="hero-feature">
-          <span class="hf-icon">🕰</span><b>分支存档</b><small>时间线快照，随时回到任意「如果」</small>
+        <div class="hero-feature" role="listitem">
+          <span class="hf-icon" aria-hidden="true">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><line x1="6" y1="3" x2="6" y2="15"/><circle cx="18" cy="6" r="3"/><circle cx="6" cy="18" r="3"/><path d="M18 9a9 9 0 0 1-9 9"/></svg>
+          </span>
+          <span class="hf-text"><b>分支存档</b><small>时间线快照，随时回到任意「如果」</small></span>
         </div>
       </div>
     </div>
@@ -98,7 +111,9 @@
         </div>
         <div class="panel-body">
           <div class="dropzone" id="dropzone">
-            <span class="dz-icon">📖</span>
+            <span class="dz-icon" aria-hidden="true">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8Z"/><path d="M14 2v6h6"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></svg>
+            </span>
             <p class="dz-main">拖拽文件到此处，或 <label class="link">点击选择<input type="file" id="fileInput" accept=".txt,.md,.text,.epub,.pdf,.png,application/pdf,application/epub+zip" hidden /></label></p>
             <p class="dz-sub">支持 TXT / Markdown / EPUB / PDF · PNG 角色卡 · 文件全程在浏览器内解析，不上传服务器</p>
             <div class="dz-formats">
@@ -109,14 +124,14 @@
             </div>
           </div>
           <div class="row gap">
-            <button id="btnCharacterCard" class="btn ghost">🎭 导入角色卡</button>
+            <button id="btnCharacterCard" class="btn ghost">导入角色卡</button>
             <input type="file" id="cardInput" accept=".png,image/png" hidden />
           </div>
           <div class="or-divider"><span>或</span></div>
           <textarea id="pasteArea" class="paste-area" placeholder="在此粘贴小说全文（建议 3000 字以上以获得更好体验）……"></textarea>
           <div class="row gap">
-            <button id="btnParse" class="btn primary">⚡ 解析小说</button>
-            <button id="btnSample" class="btn ghost">🎮 载入示例小说（零配置体验）</button>
+            <button id="btnParse" class="btn primary">解析小说</button>
+            <button id="btnSample" class="btn ghost">载入示例小说（零配置体验）</button>
           </div>
         </div>
       </div>
@@ -171,7 +186,7 @@
           </div>
           <div class="stage-head-actions">
             <button id="btnStop" class="btn small ghost" style="display:none">⏹ 停止生成</button>
-            <button id="btnWorldbook" class="btn small ghost">📚 世界书</button>
+            <button id="btnWorldbook" class="btn small ghost">世界书</button>
             <button id="btnExport" class="btn small ghost">📤 导出</button>
             <button id="btnEnding" class="btn small ghost">🏁 生成结局</button>
             <button id="btnRestart" class="btn small ghost">↺ 重开本局</button>
@@ -200,20 +215,20 @@
         <div id="sideProgress" class="side-empty">未开始</div>
       </div>
       <div class="side-block">
-        <h4>🧠 记忆体 <span class="side-hint" id="memoryMeta"></span></h4>
+        <h4>记忆体 <span class="side-hint" id="memoryMeta"></span></h4>
         <div id="sideMemory" class="side-empty">尚无摘要 · 近期对话将逐字保留</div>
       </div>
       <div class="side-block">
-        <h4>🎭 角色状态 <span class="side-hint" id="stateMeta"></span></h4>
+        <h4>角色状态 <span class="side-hint" id="stateMeta"></span></h4>
         <div id="sideState" class="side-empty">尚未开始 · 进入故事后展示位置/关系/物品</div>
       </div>
       <div class="side-block">
-        <h4>📚 世界书 <span class="side-hint" id="worldbookMeta"></span></h4>
+        <h4>世界书 <span class="side-hint" id="worldbookMeta"></span></h4>
         <div id="sideWorldbook" class="side-empty">从世界卡片自动提炼，或手动添加设定条目</div>
         <button id="btnWorldbookSide" class="btn small ghost wb-open">管理世界书</button>
       </div>
       <div class="side-block">
-        <h4>🕰 分支时间线 <span class="side-hint" id="timelineMeta"></span></h4>
+        <h4>分支时间线 <span class="side-hint" id="timelineMeta"></span></h4>
         <div class="timeline-list" id="timelineList"><div class="side-empty">尚无存档 · 剧情推进中自动创建快照</div></div>
       </div>
       <div class="side-block">
@@ -242,14 +257,14 @@
   <footer class="footer">
     <div class="footer-brand">Playable Novel · 可玩小说引擎</div>
     <div>开源 · BYOK · 数据本地 · MIT License</div>
-    <div class="footer-star">觉得不错？<a href="https://github.com/StarlitSKy88/playable-novel" target="_blank" rel="noopener">⭐ 去 GitHub 点个 Star</a> · 参加 WorkBuddy 1024 造物挑战</div>
+    <div class="footer-star">觉得不错？<a href="https://github.com/StarlitSKy88/playable-novel" target="_blank" rel="noopener">去 GitHub 点个 Star</a> · 参加 WorkBuddy 1024 造物挑战</div>
   </footer>
 
   <!-- ========== API 设置弹窗 ========== -->
   <div class="modal-mask" id="settingsModal">
     <div class="modal">
       <div class="modal-head">
-        <h3>🔑 API 设置（BYOK 模式）</h3>
+        <h3>API 设置（BYOK 模式）</h3>
         <button class="modal-close" id="btnCloseSettings">✕</button>
       </div>
       <div class="modal-body">
@@ -320,13 +335,13 @@
   <div class="modal-mask" id="worldbookModal">
     <div class="modal modal-wide">
       <div class="modal-head">
-        <h3>📚 世界书 · 设定锁定</h3>
+        <h3>世界书 · 设定锁定</h3>
         <button class="modal-close" id="btnCloseWorldbook">✕</button>
       </div>
       <div class="modal-body">
         <p class="modal-desc">世界书条目会注入每次生成：<b>常驻条目</b>始终生效，<b>触发条目</b>在对话命中关键词时生效。AI 不得违背已锁定的设定。</p>
         <div class="row gap wb-actions">
-          <button id="btnWbAutoExtract" class="btn small">✨ 从世界卡片自动提炼</button>
+          <button id="btnWbAutoExtract" class="btn small">从世界卡片自动提炼</button>
           <span class="wb-count" id="wbCount"></span>
         </div>
         <div class="wb-list" id="wbList"></div>

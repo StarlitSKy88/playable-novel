@@ -90,10 +90,10 @@ async function saveConfig(cfg) {
 function refreshModeBadge() {
   const badge = $('modeBadge');
   if (hasLiveKey()) {
-    badge.textContent = (BACKEND_OK === false ? '📦 本地直连 · ' : '⚡ 已连接 ') + state.config.model;
+    badge.textContent = (BACKEND_OK === false ? '本地直连 · ' : '已连接 ') + state.config.model;
     badge.className = 'mode-badge live';
   } else if (BACKEND_OK === false) {
-    badge.textContent = '📦 本地模式';
+    badge.textContent = '本地模式';
     badge.className = 'mode-badge local';
   } else {
     badge.textContent = '演示模式';
@@ -250,7 +250,7 @@ async function readFile(file) {
 
 /* P2-11：SillyTavern 角色卡（PNG）→ 世界书条目 */
 async function importCharacterCardFile(file) {
-  toast('🎭 正在读取角色卡…');
+  toast('正在读取角色卡…');
   try {
     const buf = await file.arrayBuffer();
     const card = PNParser.parseCharacterCardPNG(buf);
@@ -289,7 +289,7 @@ async function importCharacterCardFile(file) {
 }
 
 async function parseNovel(text, isSample = false, metaTitle = null) {
-  toast('⚡ 正在解析章节结构……');
+  toast('正在解析章节结构……');
   let data;
   // 优先走后端；无后端（file:// 本地直用）时自动降级到前端引擎
   if (BACKEND_OK === false) {
@@ -930,7 +930,7 @@ ${state.rollingSummary ? `\n【此前的摘要】\n${state.rollingSummary}\n\n�
 只输出摘要正文，不要标题和解释。`;
 
   try {
-    toast('🧠 记忆体压缩中…', 1500);
+    toast('记忆体压缩中…', 1500);
     const r = await callAI([
       { role: 'system', content: '你是互动故事的历史记录者，负责把剧情压缩为连贯摘要。' },
       { role: 'user', content: prompt }
@@ -1181,7 +1181,7 @@ async function autoExtractWorldbook() {
     added++;
   }
   await saveWorldbook();
-  toast(added ? `✨ 已提炼 ${added} 条设定` : '条目已全部存在，无新增');
+  toast(added ? `已提炼 ${added} 条设定` : '条目已全部存在，无新增');
 }
 
 /* 生成注入文本：常驻 + 近期上下文命中关键词的触发条目 */
@@ -1412,7 +1412,7 @@ async function loadBranch(id) {
   gotoStep('step-play');
   renderHistory(); renderSideProgress(); renderMemoryPanel(); renderStatePanel();
   saveProgress();
-  toast(`📖 已读取存档：${b.name}`);
+  toast(`已读取存档：${b.name}`);
 }
 
 async function deleteBranch(id) {
@@ -1437,7 +1437,7 @@ function exportMarkdown() {
   lines.push('## 故事实录', '');
   state.history.forEach(h => {
     if (h.role === 'user') lines.push(`### 🗡 你的行动`, '', h.content, '');
-    else lines.push(`### 📖 剧情`, '', h.content, '');
+    else lines.push(`### 剧情`, '', h.content, '');
   });
   if (state.charState) {
     lines.push('## 终局状态', '', `- 位置：${state.charState.location || '未知'}`);
