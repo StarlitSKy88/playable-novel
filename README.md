@@ -35,7 +35,7 @@
 
 ```bash
 # 1. 克隆仓库
-git clone https://github.com/<your-name>/playable-novel.git
+git clone https://github.com/StarlitSKy88/playable-novel.git
 cd playable-novel
 
 # 2. 安装依赖（仅 express 一个）
