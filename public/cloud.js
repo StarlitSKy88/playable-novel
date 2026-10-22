@@ -52,8 +52,14 @@
   /* ---- 错误翻译：SDK 的 code 前缀 → 用户能看懂的话 ---- */
   function explain(err, fallback) {
     var code = err && err.error && err.error.code ? String(err.error.code) : '';
+    var kind = err && err.kind ? String(err.kind) : '';
     var msg = err && err.message ? err.message : '';
     if (err && err.needLogin) return msg;
+    // 验证码与该次发送不匹配（例如用了上一封邮件的码）或已失效
+    if (code === 'invalid_argument' && /verification code/i.test(msg)) {
+      return '验证码不正确或已失效：请使用最新一封邮件里的验证码，或重新获取一次。';
+    }
+    if (kind === 'invalid-request') return '请求未被接受：' + (msg || '请检查输入后重试');
     if (code.indexOf('auth_') === 0) return '云服务凭据校验未通过，请确认在应用线上域名打开（发布后的链接），而非本地文件直开。';
     if (code.indexOf('quota_') === 0) return '云端模型额度已用尽或触发限流，请稍后再试，或在设置里填入你自己的 API Key。';
     if (code.indexOf('request_') === 0) return '模型请求参数不被接受：' + msg;
