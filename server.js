@@ -384,7 +384,7 @@ app.get('*', (req, res) => {
   res.sendFile(path.join(__dirname, 'public', 'index.html'));
 });
 
-app.listen(PORT, () => {
-  console.log(`\n  📖 Playable Novel Engine 已启动`);
-  console.log(`  👉 http://localhost:${PORT}\n`);
+app.listen(PORT, '0.0.0.0', () => {
+  console.log(`\n  Playable Novel Engine 已启动`);
+  console.log(`  http://0.0.0.0:${PORT}\n`);
 });
