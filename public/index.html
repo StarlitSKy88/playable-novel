@@ -1,0 +1,187 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Playable Novel · 可玩小说引擎</title>
+  <link rel="stylesheet" href="style.css" />
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>📖</text></svg>" />
+</head>
+<body>
+  <!-- 顶部导航 -->
+  <header class="topbar">
+    <div class="brand">
+      <span class="brand-logo">📖</span>
+      <div class="brand-text">
+        <h1>Playable Novel</h1>
+        <span class="brand-sub">可玩小说引擎 · 你的每个决定都成为故事的一部分</span>
+      </div>
+    </div>
+    <div class="topbar-actions">
+      <span id="modeBadge" class="mode-badge demo">演示模式</span>
+      <button id="btnSettings" class="btn ghost">🔑 API 设置</button>
+    </div>
+  </header>
+
+  <main class="layout">
+    <!-- ========== 左侧：流程步骤 ========== -->
+    <section class="stage" id="stage">
+
+      <!-- 步骤 1：上传小说 -->
+      <div class="panel active" id="step-upload">
+        <div class="panel-head">
+          <span class="step-num">1</span>
+          <div>
+            <h2>上传你的小说</h2>
+            <p>支持 .txt 文件或直接粘贴文本，AI 将自动解析章节与世界观</p>
+          </div>
+        </div>
+        <div class="panel-body">
+          <div class="dropzone" id="dropzone">
+            <div class="dz-icon">📄</div>
+            <p class="dz-main">拖拽 .txt 文件到此处，或 <label class="link">点击选择<input type="file" id="fileInput" accept=".txt,.md,.text" hidden /></label></p>
+            <p class="dz-sub">也可以直接粘贴小说全文</p>
+          </div>
+          <div class="or-divider"><span>或</span></div>
+          <textarea id="pasteArea" class="paste-area" placeholder="在此粘贴小说全文（建议 3000 字以上以获得更好体验）……"></textarea>
+          <div class="row gap">
+            <button id="btnParse" class="btn primary">⚡ 解析小说</button>
+            <button id="btnSample" class="btn ghost">🎮 载入示例小说（零配置体验）</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- 步骤 2：世界卡片 -->
+      <div class="panel" id="step-world">
+        <div class="panel-head">
+          <span class="step-num">2</span>
+          <div>
+            <h2>世界卡片</h2>
+            <p>AI 从原著中提炼的世界观与人物，互动剧情将严格遵循这些设定</p>
+          </div>
+        </div>
+        <div class="panel-body">
+          <div id="worldCard" class="world-card loading">正在推演世界设定……</div>
+          <div class="row gap">
+            <button id="btnReanalyze" class="btn ghost">🔄 重新推演</button>
+            <button id="btnGoChapters" class="btn primary">选择入口章节 →</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- 步骤 3：选择章节与角色 -->
+      <div class="panel" id="step-chapters">
+        <div class="panel-head">
+          <span class="step-num">3</span>
+          <div>
+            <h2>选择你的入口</h2>
+            <p>从任意章节切入故事，并决定你要扮演谁</p>
+          </div>
+        </div>
+        <div class="panel-body">
+          <div class="role-picker" id="rolePicker">
+            <h3>扮演角色</h3>
+            <div class="role-options" id="roleOptions"></div>
+            <div class="custom-role">
+              <input id="customRoleName" type="text" placeholder="自定义身份，如：神秘的过旅法师" />
+              <button id="btnCustomRole" class="btn small">使用</button>
+            </div>
+          </div>
+          <h3 class="mt">入口章节</h3>
+          <div class="chapter-list" id="chapterList"></div>
+        </div>
+      </div>
+
+      <!-- 步骤 4：互动舞台 -->
+      <div class="panel stage-panel" id="step-play">
+        <div class="stage-head">
+          <div class="stage-title">
+            <span id="playChapterTitle">第 1 章</span>
+            <span class="stage-role" id="playRole">身份：主角</span>
+          </div>
+          <div class="stage-head-actions">
+            <button id="btnEnding" class="btn small ghost">🏁 生成结局</button>
+            <button id="btnRestart" class="btn small ghost">↺ 重开本局</button>
+          </div>
+        </div>
+        <div class="story-flow" id="storyFlow"></div>
+        <div class="composer">
+          <div class="suggestions" id="suggestions"></div>
+          <div class="composer-row">
+            <input id="actionInput" type="text" placeholder="输入你的行动、台词或决定，AI 将续写世界对你的回应……" />
+            <button id="btnSend" class="btn primary send">发送 ⏎</button>
+          </div>
+          <div class="composer-hint">提示：像跑团一样自由描述，例如「拔剑挡在女孩身前」「谎称自己是宫廷使者」</div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ========== 右侧：状态面板 ========== -->
+    <aside class="sidebar" id="sidebar">
+      <div class="side-block">
+        <h4>📜 当前世界</h4>
+        <div id="sideWorld" class="side-empty">尚未加载小说</div>
+      </div>
+      <div class="side-block">
+        <h4>🧭 剧情进度</h4>
+        <div id="sideProgress" class="side-empty">未开始</div>
+      </div>
+      <div class="side-block">
+        <h4>💠 已触发事件</h4>
+        <ul id="sideEvents" class="side-events"><li class="side-empty">暂无</li></ul>
+      </div>
+      <div class="side-block side-tips">
+        <h4>💡 玩法说明</h4>
+        <ul>
+          <li>上传任意小说，AI 自动提取设定</li>
+          <li>选择章节入口与扮演角色</li>
+          <li>自由输入行动，剧情实时续写</li>
+          <li>配置 API Key 后使用真实大模型</li>
+        </ul>
+      </div>
+    </aside>
+  </main>
+
+  <!-- ========== API 设置弹窗 ========== -->
+  <div class="modal-mask" id="settingsModal">
+    <div class="modal">
+      <div class="modal-head">
+        <h3>🔑 API 设置（BYOK 模式）</h3>
+        <button class="modal-close" id="btnCloseSettings">✕</button>
+      </div>
+      <div class="modal-body">
+        <p class="modal-desc">支持任何 <b>OpenAI 兼容接口</b>。Key 仅保存在你的浏览器本地，不会上传服务器。</p>
+        <label>接口地址 Base URL</label>
+        <input id="cfgBaseUrl" type="text" placeholder="https://api.openai.com/v1" />
+        <label>API Key</label>
+        <input id="cfgApiKey" type="password" placeholder="sk-..." />
+        <label>模型名称</label>
+        <input id="cfgModel" type="text" placeholder="gpt-4o-mini / deepseek-chat / qwen-plus ..." />
+        <div class="preset-row">
+          <span>快捷预设：</span>
+          <button class="chip" data-preset="openai">OpenAI</button>
+          <button class="chip" data-preset="deepseek">DeepSeek</button>
+          <button class="chip" data-preset="qwen">通义千问</button>
+          <button class="chip" data-preset="kimi">Kimi</button>
+          <button class="chip" data-preset="ollama">Ollama 本地</button>
+        </div>
+        <div class="toggle-row">
+          <label class="switch">
+            <input type="checkbox" id="cfgUseMock" checked />
+            <span>未配置 Key 时使用演示模式（本地模拟生成）</span>
+          </label>
+        </div>
+      </div>
+      <div class="modal-foot">
+        <button id="btnSaveSettings" class="btn primary">保存设置</button>
+        <button id="btnClearSettings" class="btn ghost">清除并回到演示模式</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Toast -->
+  <div class="toast" id="toast"></div>
+
+  <script src="app.js"></script>
+</body>
+</html>

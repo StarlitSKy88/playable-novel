@@ -1,0 +1,27 @@
+{
+  "name": "playable-novel",
+  "version": "1.0.0",
+  "description": "Playable Novel Engine - 把任何小说变成可玩的互动故事 (BYOK AI Interactive Fiction)",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "node server.js"
+  },
+  "keywords": [
+    "ai",
+    "interactive-fiction",
+    "novel",
+    "roleplay",
+    "ooc",
+    "llm",
+    "byok"
+  ],
+  "author": "",
+  "license": "MIT",
+  "dependencies": {
+    "express": "^4.19.2"
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}
