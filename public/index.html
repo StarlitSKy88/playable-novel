@@ -5,13 +5,14 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Playable Novel · 可玩小说引擎</title>
   <meta name="description" content="把任何小说变成你可以走进去的世界。上传自己的小说 + 自带 API Key，获得 AI 互动叙事：分层记忆、流式生成、世界书锁定、分支存档。" />
-  <link rel="preconnect" href="https://fonts.googleapis.com" />
-  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-  <link href="https://fonts.googleapis.com/css2?family=Noto+Serif+SC:wght@400;500;600;700&family=Noto+Sans+SC:wght@400;500;600;700&display=swap" rel="stylesheet" />
+  <meta name="theme-color" content="#0a0912" />
+  <meta property="og:title" content="Playable Novel · 可玩小说引擎" />
+  <meta property="og:description" content="把任何小说变成你可以走进去的世界。上传自己的小说 + 自带 API Key，获得 AI 互动叙事：分层记忆、流式生成、世界书锁定、分支存档。" />
+  <meta property="og:type" content="website" />
   <link rel="stylesheet" href="style.css" />
   <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>📖</text></svg>" />
 </head>
-<body>
+<body data-step="upload" class="booting">
   <!-- 氛围背景 -->
   <div class="bg-canvas"></div>
   <canvas id="starfield"></canvas>
@@ -45,6 +46,35 @@
     <div class="step-bar-item" data-step="play"><span class="sb-dot">4</span><span>互动舞台</span></div>
   </nav>
 
+  <!-- 首屏 Hero：只在步骤 1 展示 -->
+  <section class="hero" id="hero" aria-labelledby="heroHeadline">
+    <div class="hero-kicker">Playable Novel · BYOK Interactive Fiction</div>
+    <h2 class="hero-headline" id="heroHeadline">
+      <span class="hl-line">把你的小说，</span>
+      <span class="hl-line">变成能走进去的世界</span>
+    </h2>
+    <p class="hero-subline">
+      上传任意一本小说，配好你自己的 API Key，AI 立刻接管叙事。<br />
+      分层记忆记得住你说过的每一句话，世界书锁死设定不让剧情跑偏，<br />
+      每一个选择都会分叉出一条只属于你的故事线。
+    </p>
+    <div class="hero-cta">
+      <button class="hero-btn primary" id="heroStart">⚡ 开始解析我的小说</button>
+      <button class="hero-btn ghost" id="heroDemo">🎮 零配置试玩示例</button>
+    </div>
+    <div class="hero-features">
+      <div class="hero-feature">
+        <span class="hf-icon">🧠</span><b>分层记忆</b><small>近期对话逐字保留 + 滚动摘要，长篇也不失忆</small>
+      </div>
+      <div class="hero-feature">
+        <span class="hf-icon">📚</span><b>世界书锁定</b><small>人物 / 地点 / 规则常驻注入，Canon Guard 校验不跑偏</small>
+      </div>
+      <div class="hero-feature">
+        <span class="hf-icon">🕰</span><b>分支存档</b><small>时间线快照随时回溯，一条故事走出多个结局</small>
+      </div>
+    </div>
+  </section>
+
   <main class="layout">
     <!-- ========== 左侧：流程步骤 ========== -->
     <section class="stage" id="stage">
@@ -59,10 +89,6 @@
           </div>
         </div>
         <div class="panel-body">
-          <div class="hero-line">
-            <div class="hero-title">「 别人给你书库，我们让你走进自己的书 」</div>
-            <div class="hero-sub">LEAVE THE SCRIPTS BEHIND · YOUR STORY BEGINS HERE</div>
-          </div>
           <div class="dropzone" id="dropzone">
             <span class="dz-icon">📖</span>
             <p class="dz-main">拖拽文件到此处，或 <label class="link">点击选择<input type="file" id="fileInput" accept=".txt,.md,.text,.epub,.pdf,.png,application/pdf,application/epub+zip" hidden /></label></p>
@@ -364,5 +390,6 @@
   <script src="parsers.js"></script>
   <script src="app.js"></script>
   <script src="starfield.js"></script>
+  <script src="motion.js"></script>
 </body>
 </html>

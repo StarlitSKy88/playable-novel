@@ -1929,7 +1929,9 @@ const STEP_ORDER = ['upload', 'world', 'chapters', 'play'];
 function gotoStep(id) {
   document.querySelectorAll('.panel').forEach(p => p.classList.remove('active'));
   $(id).classList.add('active');
-  const idx = STEP_ORDER.indexOf(id.replace('step-', ''));
+  const step = id.replace('step-', '');
+  document.body.dataset.step = step;   // 驱动首屏 Hero 的显隐
+  const idx = STEP_ORDER.indexOf(step);
   document.querySelectorAll('.step-bar-item').forEach((el, i) => {
     el.classList.toggle('active', i === idx);
     el.classList.toggle('done', i < idx);

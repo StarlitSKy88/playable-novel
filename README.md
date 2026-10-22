@@ -6,7 +6,7 @@
 [![Node](https://img.shields.io/badge/node-%3E%3D18-brightgreen)]()
 [![License](https://img.shields.io/badge/license-MIT-blue)]()
 [![BYOK](https://img.shields.io/badge/AI-Bring%20Your%20Own%20Key-purple)]()
-[![E2E](https://img.shields.io/badge/tests-11%20steps%20passed-brightgreen)]()
+[![E2E](https://img.shields.io/badge/tests-95%20assertions%20passed-brightgreen)]()
 
 **Playable Novel** 是一个开源 AI 互动小说引擎：上传你自己的小说，AI 自动解析世界观与人物，你选择入口章节、决定扮演谁，然后**用一句话行动**，实时续写只属于你的剧情。
 
@@ -106,8 +106,11 @@ open http://localhost:3000
 │  ├─ 章节解析 / AI 流式请求 / 演示模式          │
 │  ├─ parsers.js：EPUB(zip+DecompressionStream) │
 │  │   / PDF(pdf.js) / 角色卡(PNG tEXt) / 语言检测 │
+│  ├─ motion.js：WAAPI 首屏入场时间线            │
 │  ├─ IndexedDB：配置/小说/进度/世界书/存档/插画  │
 │  ├─ 星空 canvas 氛围背景 · 衬线叙事排版         │
+│  ├─ 字体自托管：西文 Inter 变量字体 47KB        │
+│  │   + 中文系统字体栈，file:// 离线也不塌版     │
 │  └─ 三通道 AI：Node 代理 → 浏览器直连 → 演示引擎 │
 │     （后端缺失自动降级，file:// 打开即用）       │
 ├─────────────────────────────────────────────┤
@@ -147,13 +150,32 @@ open http://localhost:3000
 
 ---
 
+## 🧪 测试
+
+三套测试共 **95 项断言**，http 与 `file://` 双通道：
+
+```bash
+npm i -D puppeteer-core   # 复用本机 Chrome
+npm start                 # 终端 1
+node tests/e2e.js         # 终端 2：全流程 32 项（上传→推演→8 轮互动→干预→导出→刷新恢复）
+node tests/visual.js      # 终端 3：首屏视觉验收 44 项（坐标/字号/折叠线/字体/溢出/减少动效）
+node tests/parsers.test.js# 无需浏览器：EPUB/PDF/角色卡/语言检测 19 项
+```
+
+其中 `visual.js` 是坐标级验收：在 1440×900 下断言 Hero 各元素的真实落点、
+三卡同行等宽、CTA 在折叠线之上、820/375 无横向溢出、
+`prefers-reduced-motion` 下无元素残留不可见。
+
+---
+
 ## 🗺️ Roadmap
 
-- [ ] 图片生成（场景插画，接入任意图像 API）
-- [ ] `.epub` / `.pdf` 导入
-- [ ] 长期记忆压缩（超长篇上下文优化）
+- [x] 图片生成（场景插画，接入 Pollinations / DALL·E 3 / OpenRouter / SD 本地）
+- [x] `.epub` / `.pdf` 导入（浏览器内解析）
+- [x] 长期记忆压缩（分层记忆：逐字 + 滚动摘要）
+- [x] 故事导出（Markdown / JSON 存档 / 分享链接）
+- [ ] PNG 角色卡导出（导入已支持）
 - [ ] 多结局树可视化
-- [ ] 故事导出（Markdown / 分享链接）
 
 ---
 
