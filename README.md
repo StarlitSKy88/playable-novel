@@ -6,6 +6,7 @@
 [![Node](https://img.shields.io/badge/node-%3E%3D18-brightgreen)]()
 [![License](https://img.shields.io/badge/license-MIT-blue)]()
 [![BYOK](https://img.shields.io/badge/AI-Bring%20Your%20Own%20Key-purple)]()
+[![E2E](https://img.shields.io/badge/tests-11%20steps%20passed-brightgreen)]()
 
 **Playable Novel** 是一个开源 AI 互动小说引擎：上传你自己的小说，AI 自动解析世界观与人物，你选择入口章节、决定扮演谁，然后**用一句话行动**，实时续写只属于你的剧情。
 
