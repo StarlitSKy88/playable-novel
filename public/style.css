@@ -352,3 +352,99 @@ body {
 ::-webkit-scrollbar-track { background: transparent; }
 ::-webkit-scrollbar-thumb { background: var(--border); border-radius: 4px; }
 ::-webkit-scrollbar-thumb:hover { background: var(--accent); }
+
+/* ============================================================
+ * P0 新增：消息操作栏 / 记忆体 / 成本面板 / 流式光标 / 冲突标黄
+ * ============================================================ */
+
+/* ---- 消息操作栏（悬停显示） ---- */
+.msg { position: relative; }
+.msg-ops {
+  position: absolute; top: 6px; right: 6px;
+  display: none; gap: 4px;
+  background: rgba(15, 14, 23, .92);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 3px;
+  z-index: 5;
+}
+.msg:hover .msg-ops { display: flex; }
+.msg-ops button {
+  background: none; border: none; cursor: pointer;
+  font-size: 12px; padding: 3px 7px; border-radius: 5px;
+  color: var(--text-dim); font-family: inherit;
+  transition: all .15s;
+}
+.msg-ops button:hover { background: var(--panel-2); color: var(--text); }
+.msg-ops button.danger:hover { color: #f87171; }
+
+/* ---- 编辑态 ---- */
+.msg-edit {
+  width: 100%; min-height: 70px;
+  background: var(--bg); border: 1px solid var(--accent);
+  border-radius: 10px; color: var(--text);
+  padding: 12px 14px; font-size: 15px; line-height: 1.8;
+  font-family: inherit; resize: vertical;
+}
+.msg-edit:focus { outline: none; }
+.msg-edit-row { display: flex; gap: 8px; margin-top: 8px; justify-content: flex-end; }
+
+/* ---- 流式光标 ---- */
+.stream-cursor {
+  display: inline-block; width: 9px; height: 17px;
+  background: var(--accent); border-radius: 2px;
+  margin-left: 3px; vertical-align: -2px;
+  animation: cursorBlink .8s steps(2) infinite;
+}
+@keyframes cursorBlink { 50% { opacity: 0; } }
+
+/* ---- Canon Guard 冲突标黄（P1-6 预留样式） ---- */
+.msg.narration.canon-warn {
+  border-left-color: var(--warn);
+  background: linear-gradient(90deg, rgba(251, 191, 36, .07), var(--bg-soft) 40%);
+}
+.canon-banner {
+  display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+  margin-top: 12px; padding: 8px 12px;
+  border: 1px dashed rgba(251, 191, 36, .45);
+  border-radius: 8px; font-size: 12px; color: var(--warn);
+}
+.canon-banner .btn { font-size: 11px; padding: 3px 10px; }
+
+/* ---- 侧边栏：记忆体 / 成本 ---- */
+.side-hint { font-size: 11px; color: var(--text-dim); font-weight: 400; margin-left: 4px; }
+#sideMemory {
+  font-size: 12px; line-height: 1.7; color: var(--text-dim);
+  max-height: 180px; overflow-y: auto;
+  white-space: pre-wrap;
+  border-left: 2px solid var(--accent);
+  padding-left: 10px;
+}
+#sideMemory .mem-latest { color: var(--text); }
+.mem-bar {
+  margin-top: 8px; height: 4px; border-radius: 2px;
+  background: var(--border); overflow: hidden;
+}
+.mem-bar i {
+  display: block; height: 100%;
+  background: var(--accent-grad);
+  transition: width .4s ease;
+}
+.mem-meta { font-size: 11px; color: var(--text-dim); margin-top: 6px; }
+
+#sideUsage { font-size: 12px; line-height: 1.9; }
+#sideUsage b { color: var(--accent); }
+.usage-row { display: flex; justify-content: space-between; }
+.usage-note { font-size: 11px; color: var(--text-dim); margin-top: 6px; }
+
+/* ---- 分支时间线（P1-7 预留样式） ---- */
+.timeline-list { display: flex; flex-direction: column; gap: 6px; max-height: 220px; overflow-y: auto; }
+.timeline-item {
+  font-size: 12px; padding: 7px 10px;
+  border: 1px solid var(--border); border-radius: 8px;
+  cursor: pointer; transition: all .15s;
+  color: var(--text-dim);
+}
+.timeline-item:hover { border-color: var(--accent); color: var(--text); }
+.timeline-item.current { border-color: var(--accent-2); color: var(--text); }
+.timeline-item small { display: block; font-size: 10px; opacity: .7; margin-top: 2px; }

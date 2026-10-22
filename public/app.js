@@ -6,30 +6,35 @@
 
 /* ---------------- 全局状态 ---------------- */
 const state = {
-  config: loadConfig(),        // { baseUrl, apiKey, model, useMock }
-  novel: null,                 // { title, chapters[], totalChars }
-  world: null,                 // AI 推演的世界卡片（Markdown 文本）
-  characters: [],              // 提取的人物 [{ name, desc }]
-  selectedRole: null,          // 当前扮演身份
-  entryChapter: 0,             // 入口章节 id
-  history: [],                 // [{ role: 'user'|'ai', content }]
-  events: [],                  // 已触发事件摘要
+  config: {},               // { baseUrl, apiKey, model, useMock, stream, imageProvider... }
+  novel: null,              // { title, chapters[], fullText }
+  world: null,              // AI 推演的世界卡片（Markdown 文本）
+  characters: [],           // 提取的人物 [{ name, desc }]
+  selectedRole: null,       // 当前扮演身份
+  entryChapter: 0,          // 入口章节 id
+  history: [],              // [{ role: 'user'|'ai', content }]
+  events: [],               // 已触发事件摘要
   turn: 0,
-  playing: false
+  playing: false,
+  rollingSummary: '',       // P0-1 分层记忆：滚动摘要（故事至今）
+  summarizedTurns: 0,       // 已被摘要覆盖的轮数
+  usage: { promptTokens: 0, completionTokens: 0, calls: 0 }, // P0-4 成本统计
+  genAbort: null            // P0-2 流式：当前生成的 AbortController
 };
 
 const $ = id => document.getElementById(id);
-const LS_KEY = 'playable-novel-state-v1';
 
 /* ---------------- 初始化 ---------------- */
-document.addEventListener('DOMContentLoaded', () => {
+document.addEventListener('DOMContentLoaded', async () => {
+  await DB.migrateFromLocalStorage();
+  state.config = (await DB.get(PN_STORE.config, 'main')) || {};
   bindUpload();
   bindSettings();
   bindWorld();
   bindChapters();
   bindPlay();
   refreshModeBadge();
-  restoreProgress();
+  await restoreProgress();
 });
 
 function toast(msg, ms = 2600) {
@@ -43,18 +48,13 @@ function toast(msg, ms = 2600) {
 /* ============================================================
  * 配置管理（BYOK）
  * ============================================================ */
-function loadConfig() {
-  try {
-    return JSON.parse(localStorage.getItem('pn-config') || '{}');
-  } catch { return {}; }
-}
-function saveConfig(cfg) {
-  localStorage.setItem('pn-config', JSON.stringify(cfg));
-  state.config = cfg;
-  refreshModeBadge();
-}
 function hasLiveKey() {
   return !!(state.config.baseUrl && state.config.apiKey && state.config.model);
+}
+async function saveConfig(cfg) {
+  state.config = cfg;
+  await DB.set(PN_STORE.config, 'main', cfg);
+  refreshModeBadge();
 }
 function refreshModeBadge() {
   const badge = $('modeBadge');
@@ -73,6 +73,7 @@ function bindSettings() {
     $('cfgApiKey').value = state.config.apiKey || '';
     $('cfgModel').value = state.config.model || '';
     $('cfgUseMock').checked = state.config.useMock !== false;
+    $('cfgStream').checked = state.config.stream !== false;
     $('settingsModal').classList.add('open');
   };
   $('btnCloseSettings').onclick = () => $('settingsModal').classList.remove('open');
@@ -95,18 +96,19 @@ function bindSettings() {
     };
   });
 
-  $('btnSaveSettings').onclick = () => {
-    saveConfig({
+  $('btnSaveSettings').onclick = async () => {
+    await saveConfig({
       baseUrl: $('cfgBaseUrl').value.trim(),
       apiKey: $('cfgApiKey').value.trim(),
       model: $('cfgModel').value.trim(),
-      useMock: $('cfgUseMock').checked
+      useMock: $('cfgUseMock').checked,
+      stream: $('cfgStream').checked
     });
     $('settingsModal').classList.remove('open');
     toast(hasLiveKey() ? '✅ 已连接真实大模型，开始你的故事吧' : '⚙️ 已保存，未配置 Key 时将使用演示模式');
   };
-  $('btnClearSettings').onclick = () => {
-    localStorage.removeItem('pn-config');
+  $('btnClearSettings').onclick = async () => {
+    await DB.clear(PN_STORE.config);
     state.config = {};
     refreshModeBadge();
     $('settingsModal').classList.remove('open');
@@ -220,10 +222,12 @@ async function analyzeWorld() {
 
   let content;
   try {
-    content = await callAI([
+    const r = await callAI([
       { role: 'system', content: '你是一位专业的世界观架构师，擅长从小说文本中提炼设定。' },
       { role: 'user', content: prompt }
     ], 0.5, 900);
+    content = r.content;
+    addUsage(r.usage);
   } catch (e) {
     content = null;
     toast('AI 推演失败：' + e.message);
@@ -312,21 +316,48 @@ function guessProtagonist() {
 /* ============================================================
  * 步骤 4：互动舞台
  * ============================================================ */
+/* ============================================================
+ * P0 记忆分层常量：最近 VERBATIM_KEEP 条逐字进 prompt，
+ * 更早的每积累 SUMMARY_BATCH 条压缩进「故事至今」摘要
+ * ============================================================ */
+const VERBATIM_KEEP = 6;
+const SUMMARY_BATCH = 6;
+let _hidSeq = 1;
+function nextHid() { return _hidSeq++; }
+
 function bindPlay() {
   $('btnSend').onclick = sendAction;
   $('actionInput').addEventListener('keydown', e => {
     if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendAction(); }
   });
   $('btnRestart').onclick = () => {
+    if (state.genAbort) return toast('正在生成中，请先停止或等待完成');
     if (!confirm('确定重开本局？当前剧情进度将被清除。')) return;
-    state.history = []; state.events = []; state.turn = 0; state.playing = false;
-    $('storyFlow').innerHTML = '';
-    $('suggestions').innerHTML = '';
-    renderSideProgress();
+    resetPlayState();
     gotoStep('step-chapters');
     toast('已重开，重新选择入口吧');
   };
   $('btnEnding').onclick = generateEnding;
+  $('btnStop').onclick = stopGeneration;
+}
+
+function resetPlayState() {
+  state.history = []; state.events = []; state.turn = 0; state.playing = false;
+  state.rollingSummary = ''; state.summarizedTurns = 0;
+  $('storyFlow').innerHTML = '';
+  $('suggestions').innerHTML = '';
+  renderSideProgress(); renderMemoryPanel(); saveProgress();
+}
+
+function stopGeneration() {
+  if (state.genAbort) { state.genAbort.abort(); toast('⏹ 已停止生成'); }
+}
+
+function setGenerating(on) {
+  $('btnStop').style.display = on ? '' : 'none';
+  $('btnSend').disabled = on;
+  $('btnEnding').disabled = on;
+  $('actionInput').disabled = on;
 }
 
 async function startStory(chapterId) {
@@ -335,6 +366,9 @@ async function startStory(chapterId) {
   state.events = [];
   state.turn = 0;
   state.playing = true;
+  state.rollingSummary = '';
+  state.summarizedTurns = 0;
+  _hidSeq = 1;
 
   const ch = state.novel.chapters.find(c => c.id === chapterId) || state.novel.chapters[0];
   $('playChapterTitle').textContent = ch.title;
@@ -342,34 +376,32 @@ async function startStory(chapterId) {
   $('storyFlow').innerHTML = '';
   $('suggestions').innerHTML = '';
   gotoStep('step-play');
-  renderSideProgress();
+  renderSideProgress(); renderMemoryPanel(); renderUsagePanel();
   saveProgress();
 
   addSystemNote(`你以「${state.selectedRole}」的身份，从「${ch.title}」踏入这个世界。`);
 
   // AI 生成开场：基于该章节原文 + 世界设定
-  showTyping();
   const chapterText = extractChapterText(chapterId);
   const prompt = buildStoryPrompt(chapterText) +
 `\n\n【开场任务】以「${state.selectedRole}」的视角，为这个故事写一个沉浸式开场（150-250字）：
 描写你此刻身处何地、周遭正在发生什么、身体与情绪的直观感受。
 严格遵循原著设定，第二人称「你」叙述。只输出正文，不要标题。`;
 
-  try {
-    const content = await callAI([
-      { role: 'system', content: STORY_SYSTEM_PROMPT },
-      { role: 'user', content: prompt }
-    ], 0.85, 500);
-    hideTyping();
-    let parsed = tryParseJson(content);
-    addNarration(parsed ? parsed.narration : content, parsed ? parsed.suggestions : null);
-    state.history.push({ role: 'ai', content: parsed ? parsed.narration : content });
+  const result = await runGeneration([
+    { role: 'system', content: STORY_SYSTEM_PROMPT },
+    { role: 'user', content: prompt }
+  ], {
+    temperature: 0.85, maxTokens: 500, mode: 'story',
+    mockUserText: '',
+    fallback: () => fallbackNarration(chapterText)
+  });
+
+  if (result && result.content) {
+    state.history.push({ role: 'ai', content: result.content, id: nextHid(), suggestions: result.parsed ? result.parsed.suggestions : null });
     state.turn = 1;
     renderSideProgress();
     saveProgress();
-  } catch (e) {
-    hideTyping();
-    addNarration('（AI 连接失败，已切换到演示模式续写）\n\n' + fallbackNarration(chapterText));
   }
 }
 
@@ -390,15 +422,21 @@ async function sendAction() {
   const text = input.value.trim();
   if (!text) return;
   if (!state.playing) return toast('请先选择入口章节开始故事');
+  if (state.genAbort) return toast('正在生成中，请稍候');
   input.value = '';
 
-  addUserMessage(text);
-  state.history.push({ role: 'user', content: text });
-  showTyping();
+  state.history.push({ role: 'user', content: text, id: nextHid() });
+  renderHistory();
+  await generateReply();
+}
 
-  // 组装上下文：世界设定 + 最近剧情 + 用户行动
+/* 生成 AI 回复：组装分层上下文 → 统一生成入口 → 落库 → 触发记忆压缩 */
+async function generateReply() {
   const chapterText = extractChapterText(state.entryChapter);
-  const recent = state.history.slice(-8).map(h => (h.role === 'user' ? `【你的行动】${h.content}` : `【剧情】${h.content}`)).join('\n');
+  const recent = state.history.slice(-VERBATIM_KEEP)
+    .map(h => (h.role === 'user' ? `【你的行动】${h.content}` : `【剧情】${h.content}`)).join('\n');
+  const lastUser = [...state.history].reverse().find(h => h.role === 'user');
+  const actionText = lastUser ? lastUser.content : '（静观其变）';
 
   const prompt = buildStoryPrompt(chapterText) +
 `\n\n【身份】你正在扮演：${state.selectedRole}
@@ -408,7 +446,7 @@ async function sendAction() {
 ${recent}
 
 【你刚刚的行动】
-${text}
+${actionText}
 
 【任务】以「${state.selectedRole}」的视角续写剧情（120-250字）：
 1. 世界与人物对这个行动的真实反应（符合原著人物性格）
@@ -416,50 +454,330 @@ ${text}
 3. 自然引出下一个抉择点
 严格遵循原著世界观，第二人称叙述。同时给出 3 个接下来的可选行动建议（JSON 输出）。`;
 
-  try {
-    const content = await callAI([
-      { role: 'system', content: STORY_SYSTEM_PROMPT },
-      { role: 'user', content: prompt }
-    ], 0.9, 600);
-    hideTyping();
-    let parsed = tryParseJson(content);
-    const narration = parsed ? parsed.narration : content;
-    addNarration(narration, parsed ? parsed.suggestions : null);
-    state.history.push({ role: 'ai', content: narration });
+  const result = await runGeneration([
+    { role: 'system', content: STORY_SYSTEM_PROMPT },
+    { role: 'user', content: prompt }
+  ], {
+    temperature: 0.9, maxTokens: 600, mode: 'story',
+    mockUserText: actionText,
+    fallback: () => fallbackNarration(chapterText, actionText)
+  });
+
+  if (result && result.content) {
+    state.history.push({ role: 'ai', content: result.content, id: nextHid(), suggestions: result.parsed ? result.parsed.suggestions : null });
     state.turn++;
-    // 事件摘要
-    const summary = text.slice(0, 24);
-    if (!state.events.includes(summary)) state.events.push(summary);
+    const summary = actionText.slice(0, 24);
+    if (summary && !state.events.includes(summary)) state.events.push(summary);
     renderSideProgress();
+    await maybeSummarize();
     saveProgress();
-  } catch (e) {
-    hideTyping();
-    addNarration('（AI 连接失败，已切换到演示模式续写）\n\n' + fallbackNarration(chapterText, text));
   }
 }
 
 async function generateEnding() {
   if (!state.playing) return toast('先开始一段故事吧');
-  showTyping();
+  if (state.genAbort) return toast('正在生成中，请稍候');
   const recent = state.history.slice(-10).map(h => (h.role === 'user' ? `【你的行动】${h.content}` : `【剧情】${h.content}`)).join('\n');
-  const prompt = `基于以下互动故事线，为「${state.selectedRole}」写一个结局（150-300字）：
+  addSystemNote('—— 本局结局 ——');
+  const result = await runGeneration([
+    { role: 'system', content: '你是这个故事的地下城主，现在为这段旅程画上句点。' },
+    { role: 'user', content: `基于以下互动故事线，为「${state.selectedRole}」写一个结局（150-300字）：
 呼应开头、收束本作的关键伏笔，第二人称叙述，可留一个余韵悠长的收尾。
 
-${recent}`;
-  try {
-    const content = await callAI([
-      { role: 'system', content: '你是这个故事的地下城主，现在为这段旅程画上句点。' },
-      { role: 'user', content: prompt }
-    ], 0.9, 500);
-    hideTyping();
-    addSystemNote('—— 本局结局 ——');
-    addNarration(content, null);
+${recent}` }
+  ], { temperature: 0.9, maxTokens: 500, mode: 'plain' });
+
+  if (result && result.content) {
+    state.history.push({ role: 'ai', content: result.content, id: nextHid() });
     state.playing = false;
     saveProgress();
-  } catch (e) {
-    hideTyping();
-    toast('结局生成失败：' + e.message);
   }
+}
+
+/* ============================================================
+ * 统一生成入口：流式 / 非流式 · 真实 / 演示 · usage 回写
+ * opts: { temperature, maxTokens, mode:'story'|'plain', mockUserText, fallback }
+ * 返回 { content, parsed } 或 null（完全失败）
+ * ============================================================ */
+async function runGeneration(messages, opts = {}) {
+  const { temperature = 0.8, maxTokens = 800, mode = 'story', mockUserText = '', fallback = null } = opts;
+  const useStream = state.config.stream !== false;
+
+  state.genAbort = new AbortController();
+  setGenerating(true);
+
+  let buffer = '';
+  let usage = null;
+  let msgEl = null, bodyEl = null;
+
+  const finalize = () => {
+    const parsed = mode === 'story' ? tryParseJson(buffer) : null;
+    let narration = buffer;
+    if (parsed) narration = parsed.narration;
+    else if (mode === 'story' && buffer.trim().startsWith('{')) {
+      // JSON 解析失败的兜底：提取引号内长文本
+      const m = buffer.match(/"([^"]{40,})"/);
+      if (m) narration = m[1];
+    }
+    if (msgEl && bodyEl) renderFinalMessage(msgEl, bodyEl, narration, parsed ? parsed.suggestions : null, mode);
+    if (usage) addUsage(usage);
+    scrollBottom();
+    return { content: narration, parsed };
+  };
+
+  try {
+    if (!useStream) {
+      // ---- 非流式：整体等待后一次渲染 ----
+      showTyping();
+      const r = await callAI(messages, temperature, maxTokens, 'narrate', mockUserText);
+      hideTyping();
+      buffer = r.content || '';
+      usage = r.usage || null;
+      const m = createStoryMessage();
+      msgEl = m.el; bodyEl = m.body;
+      return finalize();
+    }
+
+    // ---- 流式：SSE 增量渲染 ----
+    const m = createStoryMessage();
+    msgEl = m.el; bodyEl = m.body;
+    renderStreamText(bodyEl, '', true);
+
+    const resp = await fetch('/api/ai/stream', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        baseUrl: state.config.baseUrl,
+        apiKey: state.config.apiKey,
+        model: state.config.model,
+        messages, temperature, maxTokens,
+        mock: !hasLiveKey(),
+        mockBody: buildMockBody('narrate', mockUserText)
+      }),
+      signal: state.genAbort.signal
+    });
+    if (!resp.ok) throw new Error('HTTP ' + resp.status);
+
+    const reader = resp.body.getReader();
+    const decoder = new TextDecoder();
+    let sseBuf = '';
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      sseBuf += decoder.decode(value, { stream: true });
+      const frames = sseBuf.split('\n\n');
+      sseBuf = frames.pop() || '';
+      for (const frame of frames) {
+        if (!frame.startsWith('data:')) continue;
+        let payload;
+        try { payload = JSON.parse(frame.slice(5).trim()); } catch { continue; }
+        if (payload.error) throw new Error(payload.error);
+        if (payload.delta) {
+          buffer += payload.delta;
+          renderStreamText(bodyEl, mode === 'story' ? streamPreview(buffer) : buffer, true);
+        }
+        if (payload.done) {
+          if (typeof payload.content === 'string' && payload.content) buffer = payload.content;
+          usage = payload.usage || null;
+        }
+      }
+    }
+    return finalize();
+  } catch (e) {
+    const aborted = e.name === 'AbortError';
+    hideTyping();
+    if (aborted) {
+      // 用户主动停止：保留已生成部分
+      return buffer ? finalize() : (msgEl && msgEl.remove(), null);
+    }
+    // 真实失败：移除半成品，尝试演示兜底
+    if (msgEl) msgEl.remove();
+    if (fallback) {
+      const fb = fallback();
+      const m2 = createStoryMessage();
+      renderFinalMessage(m2.el, m2.body, fb, null, mode);
+      return { content: fb, parsed: null };
+    }
+    toast('生成失败：' + e.message + (hasLiveKey() ? '（可检查 API Key 或切换到演示模式）' : ''));
+    return null;
+  } finally {
+    hideTyping();
+    setGenerating(false);
+    state.genAbort = null;
+  }
+}
+
+/* ============================================================
+ * P0-1 分层记忆：滚动摘要
+ * ============================================================ */
+function maybeSummarize() {
+  const verbatimStart = Math.max(state.summarizedTurns, state.history.length - VERBATIM_KEEP);
+  const pending = state.history.slice(state.summarizedTurns, verbatimStart);
+  if (pending.length < SUMMARY_BATCH) return null;
+  return summarizeNow(pending);
+}
+
+async function summarizeNow(pending) {
+  const toCompress = pending.map(h => (h.role === 'user' ? `【你的行动】${h.content}` : `【剧情】${h.content}`)).join('\n');
+  const prompt = `你是互动故事的史官。请把以下早期剧情压缩成一段连贯的「故事至今」摘要（150-250字）：
+要求：保留关键事件、人物关系变化、已揭示的信息与伏笔；按时间顺序；第二人称「你」的视角。
+${state.rollingSummary ? `\n【此前的摘要】\n${state.rollingSummary}\n\n【需要合并的新剧情】\n${toCompress}` : `\n【剧情】\n${toCompress}`}
+只输出摘要正文，不要标题和解释。`;
+
+  try {
+    toast('🧠 记忆体压缩中…', 1500);
+    const r = await callAI([
+      { role: 'system', content: '你是互动故事的历史记录者，负责把剧情压缩为连贯摘要。' },
+      { role: 'user', content: prompt }
+    ], 0.3, 500, 'summarize');
+    state.rollingSummary = r.content;
+    state.summarizedTurns = Math.max(0, state.history.length - VERBATIM_KEEP);
+    renderMemoryPanel();
+  } catch (e) {
+    console.warn('记忆压缩失败（不影响剧情继续）:', e.message);
+  }
+}
+
+/* ============================================================
+ * P0-3 消息干预：编辑 / 重写 / 删除回溯
+ * ============================================================ */
+function renderHistory() {
+  const flow = $('storyFlow');
+  flow.innerHTML = '';
+  state.history.forEach(h => {
+    if (h.role === 'user') addUserMessage(h.content, h.id);
+    else addNarration(h.content, h.suggestions, h.id);
+  });
+  scrollBottom();
+}
+
+function truncateFrom(hid) {
+  const idx = state.history.findIndex(h => h.id === Number(hid));
+  if (idx < 0) return;
+  if (state.genAbort) return toast('正在生成中，请先停止');
+  if (!confirm('将删除此条及其后的全部剧情，确定回溯？')) return;
+  state.history = state.history.slice(0, idx);
+  state.summarizedTurns = Math.min(state.summarizedTurns, state.history.length);
+  renderHistory(); renderMemoryPanel(); saveProgress();
+  toast('⏪ 已回溯到该节点');
+}
+
+async function rewriteAiMessage(hid) {
+  if (state.genAbort) return toast('正在生成中，请稍候');
+  const idx = state.history.findIndex(h => h.id === Number(hid));
+  if (idx < 0) return;
+  state.history = state.history.slice(0, idx);
+  state.summarizedTurns = Math.min(state.summarizedTurns, state.history.length);
+  renderHistory();
+  await generateReply();
+}
+
+function editUserMessage(el) {
+  if (state.genAbort) return toast('正在生成中，请稍候');
+  const hid = Number(el.dataset.hid);
+  const h = state.history.find(x => x.id === hid);
+  if (!h) return;
+  el.innerHTML = '';
+  const ta = document.createElement('textarea');
+  ta.className = 'msg-edit';
+  ta.value = h.content;
+  const row = document.createElement('div');
+  row.className = 'msg-edit-row';
+  const ok = document.createElement('button');
+  ok.className = 'btn small primary'; ok.textContent = '保存并重写后续';
+  const cancel = document.createElement('button');
+  cancel.className = 'btn small ghost'; cancel.textContent = '取消';
+  row.append(cancel, ok);
+  el.append(ta, row);
+  ta.focus();
+  cancel.onclick = () => renderHistory();
+  ok.onclick = async () => {
+    const val = ta.value.trim();
+    if (!val) return toast('内容不能为空');
+    const idx = state.history.findIndex(x => x.id === hid);
+    state.history = state.history.slice(0, idx);
+    state.history.push({ role: 'user', content: val, id: hid });
+    state.summarizedTurns = Math.min(state.summarizedTurns, state.history.length);
+    renderHistory(); renderMemoryPanel();
+    await generateReply();
+  };
+}
+
+/* ============================================================
+ * P0-4 成本统计
+ * ============================================================ */
+const PRICE_TABLE = [
+  { match: /gpt-4o-mini/i,          in: 0.15, out: 0.60 },
+  { match: /gpt-4\.1-mini/i,        in: 0.10, out: 0.40 },
+  { match: /gpt-4o(?!-mini)/i,      in: 2.50, out: 10.0 },
+  { match: /gpt-4\.1(?!-mini)/i,    in: 2.00, out: 8.00 },
+  { match: /o[34]-mini/i,           in: 1.10, out: 4.40 },
+  { match: /deepseek/i,             in: 0.14, out: 0.28 },
+  { match: /qwen-plus/i,            in: 0.80, out: 2.00 },
+  { match: /qwen-turbo/i,           in: 0.30, out: 0.60 },
+  { match: /qwen/i,                 in: 0.40, out: 1.20 },
+  { match: /moonshot|kimi/i,        in: 0.60, out: 2.00 },
+  { match: /claude/i,               in: 3.00, out: 15.0 },
+  { match: /glm/i,                  in: 0.10, out: 0.10 },
+  { match: /ernie/i,                in: 0.08, out: 0.20 },
+  { match: /hunyuan/i,              in: 0.10, out: 0.30 }
+];
+
+function addUsage(usage) {
+  if (!usage) return;
+  state.usage.promptTokens += usage.prompt_tokens || 0;
+  state.usage.completionTokens += usage.completion_tokens || 0;
+  state.usage.calls += 1;
+  renderUsagePanel();
+}
+
+function renderUsagePanel() {
+  const el = $('sideUsage');
+  const u = state.usage;
+  const isMock = !hasLiveKey();
+  if (!u.calls) {
+    el.className = 'side-empty';
+    el.textContent = '尚未产生调用';
+    return;
+  }
+  el.className = '';
+  const price = PRICE_TABLE.find(p => p.match.test(state.config.model || ''));
+  let costLine = '<div class="usage-note">当前模型暂无公开价格数据，仅统计 tokens</div>';
+  if (price) {
+    const usd = (u.promptTokens / 1e6 * price.in) + (u.completionTokens / 1e6 * price.out);
+    costLine = `<div class="usage-row"><span>估算费用</span><b>$${usd.toFixed(4)}</b></div>
+      <div class="usage-note">≈ ¥${(usd * 7.2).toFixed(3)} · 按 ${escapeHtml(state.config.model)} 公开价${isMock ? '（演示估算）' : ''}估算</div>`;
+  } else if (isMock) {
+    costLine = '<div class="usage-note">演示模式：数据为本地模拟，仅作展示</div>';
+  }
+  el.innerHTML = `
+    <div class="usage-row"><span>调用次数</span><b>${u.calls}</b></div>
+    <div class="usage-row"><span>输入 tokens</span><b>${u.promptTokens.toLocaleString()}</b></div>
+    <div class="usage-row"><span>输出 tokens</span><b>${u.completionTokens.toLocaleString()}</b></div>
+    ${costLine}`;
+}
+
+function renderMemoryPanel() {
+  const el = $('sideMemory');
+  const meta = $('memoryMeta');
+  const total = state.history.length;
+  if (!total) {
+    el.className = 'side-empty';
+    el.textContent = '尚无摘要 · 近期对话将逐字保留';
+    meta.textContent = '';
+    return;
+  }
+  el.className = '';
+  const covered = Math.min(state.summarizedTurns, total);
+  const pct = total ? Math.round(covered / total * 100) : 0;
+  const bar = `<div class="mem-bar"><i style="width:${pct}%"></i></div>`;
+  if (state.rollingSummary) {
+    el.innerHTML = `<span class="mem-latest">${escapeHtml(state.rollingSummary.slice(0, 400))}${state.rollingSummary.length > 400 ? '…' : ''}</span>
+      ${bar}<div class="mem-meta">已压缩 ${covered}/${total} 条对话 · 最近 ${Math.min(VERBATIM_KEEP, total)} 条逐字保留</div>`;
+  } else {
+    el.innerHTML = `<div class="mem-meta">尚无摘要 · 最近 ${Math.min(VERBATIM_KEEP, total)} 条对话逐字保留中（旧对话累计 ${SUMMARY_BATCH} 条后自动压缩）</div>${bar}`;
+  }
+  meta.textContent = covered ? `${pct}%` : '';
 }
 
 /* ---------------- 提示词构造 ---------------- */
@@ -474,13 +792,20 @@ const STORY_SYSTEM_PROMPT =
 默认以 JSON 输出：{"narration":"剧情正文","suggestions":["建议1","建议2","建议3"],"mood":"当前氛围"}`;
 
 function buildStoryPrompt(chapterText) {
-  return `【世界设定】\n${state.world || '（未推演）'}\n\n【原著参考（当前章节上下文）】\n${chapterText.slice(0, 4000)}`;
+  const parts = [`【世界设定】\n${state.world || '（未推演）'}`];
+  // P0-1 分层记忆：早期剧情以摘要形式注入
+  if (state.rollingSummary) {
+    parts.push(`【故事至今 · 早期剧情摘要】\n${state.rollingSummary}`);
+  }
+  parts.push(`【原著参考（当前章节上下文）】\n${chapterText.slice(0, 4000)}`);
+  return parts.join('\n\n');
 }
 
 /* ============================================================
  * AI 调用（真实 / 演示双通道）
+ * 返回 { content, usage }
  * ============================================================ */
-async function callAI(messages, temperature = 0.8, maxTokens = 800) {
+async function callAI(messages, temperature = 0.8, maxTokens = 800, mockAction = 'narrate', mockUserText = '') {
   if (hasLiveKey()) {
     const resp = await fetch('/api/ai/chat', {
       method: 'POST',
@@ -494,31 +819,43 @@ async function callAI(messages, temperature = 0.8, maxTokens = 800) {
     });
     const data = await resp.json();
     if (!resp.ok) throw new Error(data.error || ('HTTP ' + resp.status));
-    return data.content;
+    return { content: data.content, usage: data.usage };
   }
   // 演示模式
-  return mockGenerate(messages);
+  return mockGenerate(messages, mockAction, mockUserText);
 }
 
-async function mockGenerate(messages) {
-  const lastUser = [...messages].reverse().find(m => m.role === 'user');
-  const userText = lastUser ? lastUser.content : '';
+/* 构造演示模式请求体（流式/非流式共用） */
+function buildMockBody(mockAction = 'narrate', mockUserText = '') {
+  return {
+    action: mockAction,
+    context: { text: state.novel ? state.novel.fullText.slice(0, 20000) : '' },
+    world: { name: guessWorldName(), protagonist: state.selectedRole, style: guessWorldStyle() },
+    userInput: mockUserText,
+    chapterTitle: (state.novel && state.novel.chapters[state.entryChapter] || {}).title,
+    history: state.history
+  };
+}
+
+async function mockGenerate(messages, mockAction = 'narrate', mockUserText = '') {
   const resp = await fetch('/api/ai/mock', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      context: { text: state.novel ? state.novel.fullText.slice(0, 20000) : '' },
-      world: { name: guessWorldName(), protagonist: state.selectedRole, style: guessWorldStyle() },
-      userInput: userText.slice(-200),
-      chapterTitle: (state.novel && state.novel.chapters[state.entryChapter] || {}).title,
-      history: state.history
-    })
+    body: JSON.stringify(buildMockBody(mockAction, mockUserText))
   });
   const data = await resp.json();
   if (!resp.ok) throw new Error(data.error || '演示生成失败');
   // 模拟网络延迟，增强真实感
-  await sleep(600 + Math.random() * 800);
-  return data.content;
+  await sleep(300 + Math.random() * 400);
+  // 演示模式模拟 usage，让成本面板有数据可看
+  return {
+    content: data.content,
+    usage: {
+      prompt_tokens: Math.ceil(JSON.stringify(messages).length / 2),
+      completion_tokens: Math.ceil((data.content || '').length / 2),
+      mock: true
+    }
+  };
 }
 
 function guessWorldName() {
@@ -563,14 +900,92 @@ ${head.slice(0, 60)}……
 }
 
 /* ============================================================
- * 消息渲染
+ * 消息渲染（含 P0-3 操作栏 / P0-2 流式）
  * ============================================================ */
-function addNarration(text, suggestions) {
+
+/* 创建一条流式占位消息，返回 { el, body } */
+function createStoryMessage() {
+  const el = document.createElement('div');
+  el.className = 'msg narration';
+  el.innerHTML = `<span class="msg-tag">◈ 剧情续写</span><div class="msg-body"></div>`;
+  $('storyFlow').appendChild(el);
+  return { el, body: el.querySelector('.msg-body') };
+}
+
+/* 流式增量渲染（story 模式做 JSON 内 narration 字段的渐进提取） */
+function renderStreamText(bodyEl, text, streaming) {
+  const cursor = streaming ? '<span class="stream-cursor"></span>' : '';
+  bodyEl.innerHTML = (text ? escapeHtml(text).replace(/\n/g, '<br>') : '') + cursor;
+  scrollBottom();
+}
+
+/* 从流式 JSON buffer 中渐进提取 narration 文本（容忍不完整 JSON） */
+function streamPreview(buf) {
+  const m = buf.match(/"narration"\s*:\s*"([\s\S]*)$/);
+  if (m) {
+    let raw = m[1];
+    const close = raw.indexOf('", "');
+    if (close >= 0) raw = raw.slice(0, close + 1);
+    raw = raw.replace(/\\$/, '');
+    try { return JSON.parse('"' + raw + '"'); }
+    catch {
+      return raw.replace(/\\n/g, '\n').replace(/\\"/g, '"').replace(/\\\\/g, '\\').replace(/\\u([0-9a-fA-F]{4})/g, (_, h) => String.fromCharCode(parseInt(h, 16)));
+    }
+  }
+  if (buf.includes('"narration"')) return '';
+  return buf.length > 60 ? buf : '';
+}
+
+/* 生成结束：渲染最终消息 + 建议 chips + 操作栏 */
+function renderFinalMessage(el, body, narration, suggestions, mode) {
+  body.innerHTML = escapeHtml(narration).replace(/\n/g, '<br>');
+  if (mode === 'story' && suggestions && suggestions.length) {
+    const chips = document.createElement('div');
+    chips.className = 'suggest-chips';
+    suggestions.forEach(s => {
+      const b = document.createElement('button');
+      b.className = 'suggest-chip';
+      b.textContent = s;
+      b.onclick = () => { $('actionInput').value = s; $('actionInput').focus(); };
+      chips.appendChild(b);
+    });
+    el.appendChild(chips);
+  }
+  el.appendChild(buildMsgOps(el, 'ai'));
+}
+
+/* P0-3：消息操作栏（悬停显示） */
+function buildMsgOps(el, kind) {
+  const ops = document.createElement('div');
+  ops.className = 'msg-ops';
+  if (kind === 'user') {
+    const edit = document.createElement('button');
+    edit.textContent = '✏️ 编辑';
+    edit.title = '编辑这条行动，并基于新输入重写后续剧情';
+    edit.onclick = () => editUserMessage(el);
+    ops.appendChild(edit);
+  } else {
+    const rw = document.createElement('button');
+    rw.textContent = '🔄 重写';
+    rw.title = '重新生成这段剧情';
+    rw.onclick = () => rewriteAiMessage(el.dataset.hid);
+    ops.appendChild(rw);
+  }
+  const del = document.createElement('button');
+  del.textContent = '✂️ 回溯';
+  del.className = 'danger';
+  del.title = '删除此条及其后的全部剧情';
+  del.onclick = () => truncateFrom(el.dataset.hid);
+  ops.appendChild(del);
+  return ops;
+}
+
+function addNarration(text, suggestions, hid) {
   const flow = $('storyFlow');
   const el = document.createElement('div');
   el.className = 'msg narration';
-  el.innerHTML = `<span class="msg-tag">◈ 剧情续写</span>${escapeHtml(text).replace(/\n/g, '<br>')}`;
-  flow.appendChild(el);
+  el.dataset.hid = hid;
+  el.innerHTML = `<span class="msg-tag">◈ 剧情续写</span><div class="msg-body">${escapeHtml(text).replace(/\n/g, '<br>')}</div>`;
   if (suggestions && suggestions.length) {
     const chips = document.createElement('div');
     chips.className = 'suggest-chips';
@@ -583,14 +998,18 @@ function addNarration(text, suggestions) {
     });
     el.appendChild(chips);
   }
+  el.appendChild(buildMsgOps(el, 'ai'));
+  flow.appendChild(el);
   scrollBottom();
 }
 
-function addUserMessage(text) {
+function addUserMessage(text, hid) {
   const flow = $('storyFlow');
   const el = document.createElement('div');
   el.className = 'msg user';
+  el.dataset.hid = hid;
   el.textContent = text;
+  el.appendChild(buildMsgOps(el, 'user'));
   flow.appendChild(el);
   scrollBottom();
 }
@@ -646,39 +1065,64 @@ function renderSideProgress() {
   else ev.innerHTML = state.events.slice(-8).map(e => `<li>${escapeHtml(e)}</li>`).join('');
 }
 
-/* ---------------- 进度持久化 ---------------- */
-function saveProgress() {
+/* ---------------- 进度持久化（IndexedDB） ---------------- */
+async function saveProgress() {
   try {
-    localStorage.setItem(LS_KEY, JSON.stringify({
-      novel: state.novel ? { title: state.novel.title, chapters: state.novel.chapters.slice(0, 20), fullText: state.novel.fullText.slice(0, 30000) } : null,
+    if (state.novel) {
+      await DB.set(PN_STORE.novel, 'main', {
+        title: state.novel.title,
+        chapters: state.novel.chapters,
+        fullText: state.novel.fullText
+      });
+    }
+    await DB.set(PN_STORE.progress, 'main', {
       world: state.world,
       selectedRole: state.selectedRole,
       entryChapter: state.entryChapter,
-      history: state.history.slice(-20),
+      history: state.history.slice(-60),
       events: state.events,
-      turn: state.turn
-    }));
-  } catch {}
+      turn: state.turn,
+      rollingSummary: state.rollingSummary,
+      summarizedTurns: state.summarizedTurns,
+      usage: state.usage
+    });
+  } catch (e) { console.warn('保存进度失败:', e.message); }
 }
-function restoreProgress() {
+async function restoreProgress() {
   try {
-    const s = JSON.parse(localStorage.getItem(LS_KEY) || 'null');
-    if (!s || !s.novel) return;
-    state.novel = s.novel;
-    state.world = s.world;
-    state.selectedRole = s.selectedRole;
-    state.entryChapter = s.entryChapter;
-    state.history = s.history || [];
-    state.events = s.events || [];
-    state.turn = s.turn || 0;
-    renderSideWorld(); renderSideProgress();
+    const novel = await DB.get(PN_STORE.novel, 'main');
+    if (!novel) return;
+    const s = await DB.get(PN_STORE.progress, 'main');
+    state.novel = novel;
+    state.world = s ? s.world : null;
+    state.selectedRole = s ? s.selectedRole : null;
+    state.entryChapter = s ? s.entryChapter : 0;
+    state.history = (s && s.history) || [];
+    state.events = (s && s.events) || [];
+    state.turn = (s && s.turn) || 0;
+    state.rollingSummary = (s && s.rollingSummary) || '';
+    state.summarizedTurns = (s && s.summarizedTurns) || 0;
+    state.usage = (s && s.usage) || { promptTokens: 0, completionTokens: 0, calls: 0 };
+    // 兼容旧数据：补齐消息 id
+    state.history.forEach(h => { if (h.id == null) h.id = nextHid(); });
+    _hidSeq = state.history.reduce((m, h) => Math.max(m, h.id || 0), 0) + 1;
+    renderSideWorld(); renderSideProgress(); renderMemoryPanel(); renderUsagePanel();
     if (state.world) {
       $('worldCard').classList.remove('loading');
       $('worldCard').textContent = state.world;
-      gotoStep('step-chapters');
+      if (state.history.length) {
+        // 有进行中的剧情：直接回到互动舞台
+        const ch = state.novel.chapters.find(c => c.id === state.entryChapter) || state.novel.chapters[0];
+        $('playChapterTitle').textContent = ch ? ch.title : '';
+        $('playRole').textContent = `身份：${state.selectedRole || '-'}`;
+        gotoStep('step-play');
+        renderHistory();
+      } else {
+        gotoStep('step-chapters');
+      }
       toast('已恢复上次的阅读进度');
     }
-  } catch {}
+  } catch (e) { console.warn('恢复进度失败:', e.message); }
 }
 
 /* ---------------- 工具 ---------------- */

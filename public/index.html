@@ -100,6 +100,7 @@
             <span class="stage-role" id="playRole">身份：主角</span>
           </div>
           <div class="stage-head-actions">
+            <button id="btnStop" class="btn small ghost" style="display:none">⏹ 停止生成</button>
             <button id="btnEnding" class="btn small ghost">🏁 生成结局</button>
             <button id="btnRestart" class="btn small ghost">↺ 重开本局</button>
           </div>
@@ -127,6 +128,14 @@
         <div id="sideProgress" class="side-empty">未开始</div>
       </div>
       <div class="side-block">
+        <h4>🧠 记忆体 <span class="side-hint" id="memoryMeta"></span></h4>
+        <div id="sideMemory" class="side-empty">尚无摘要 · 近期对话将逐字保留</div>
+      </div>
+      <div class="side-block">
+        <h4>💰 成本统计</h4>
+        <div id="sideUsage" class="side-empty">尚未产生调用</div>
+      </div>
+      <div class="side-block">
         <h4>💠 已触发事件</h4>
         <ul id="sideEvents" class="side-events"><li class="side-empty">暂无</li></ul>
       </div>
@@ -136,6 +145,7 @@
           <li>上传任意小说，AI 自动提取设定</li>
           <li>选择章节入口与扮演角色</li>
           <li>自由输入行动，剧情实时续写</li>
+          <li>悬停消息可编辑 / 重写 / 回溯</li>
           <li>配置 API Key 后使用真实大模型</li>
         </ul>
       </div>
@@ -171,6 +181,12 @@
             <span>未配置 Key 时使用演示模式（本地模拟生成）</span>
           </label>
         </div>
+        <div class="toggle-row">
+          <label class="switch">
+            <input type="checkbox" id="cfgStream" checked />
+            <span>流式输出（打字机效果；关闭可提升 prompt 缓存命中、更省钱）</span>
+          </label>
+        </div>
       </div>
       <div class="modal-foot">
         <button id="btnSaveSettings" class="btn primary">保存设置</button>
@@ -182,6 +198,7 @@
   <!-- Toast -->
   <div class="toast" id="toast"></div>
 
+  <script src="storage.js"></script>
   <script src="app.js"></script>
 </body>
 </html>

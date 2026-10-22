@@ -139,58 +139,82 @@ app.post('/api/ai/chat', async (req, res) => {
 /* ---------------- 演示模式生成器 ----------------
  * 没有 API Key 也能完整体验产品流程：
  * 基于小说原文 + 用户输入做关键词匹配 + 模板拼装，产出"伪 AI"剧情
+ * action = 'narrate'（默认，剧情续写）| 'summarize'（记忆压缩）
  */
 app.post('/api/ai/mock', (req, res) => {
   try {
-    const { context, world, userInput, chapterTitle, history } = req.body || {};
-    const text = (context && context.text) || '';
-    const sentences = splitSentences(text);
-
-    // 1. 找出与用户输入最相关的原文句子（简单词重叠打分）
-    const keywords = (userInput || '').replace(/[，。！？、,.!?]/g, ' ').split(/\s+/).filter(w => w.length >= 2);
-    let best = [];
-    if (keywords.length) {
-      best = sentences
-        .map(s => ({ s, score: keywords.reduce((acc, k) => acc + (s.includes(k) ? 1 : 0), 0) }))
-        .filter(x => x.score > 0)
-        .sort((a, b) => b.score - a.score)
-        .slice(0, 3)
-        .map(x => x.s);
+    const { action = 'narrate' } = req.body || {};
+    if (action === 'summarize') {
+      return res.json({ content: mockSummarize(req.body) });
     }
-    // 2. 补充随机环境描写句
-    const filler = shuffle(sentences).slice(0, 2);
-
-    const worldName = (world && world.name) || '这个世界';
-    const protagonist = (world && world.protagonist) || '你';
-    const style = (world && world.style) || '奇幻冒险';
-
-    const templates = [
-      () => `${pick(best)}。空气仿佛凝固了一瞬，${protagonist}能清楚地听见自己的心跳。${pick(filler)}。事情的发展显然脱离了所有人的预料——包括你。`,
-      () => `就在你行动的瞬间，${pick(best)}。${pick(filler)}。这就是${worldName}的法则：每一个选择都会留下痕迹，而你刚刚写下的一笔，恐怕比想象中更深。`,
-      () => `${pick(best)}。远处传来若有若无的回响，像是回应，又像是警告。${pick(filler)}。你知道，从这一刻起，「${chapterTitle || '故事'}」的走向已经改变。`,
-      () => `你的行动像一颗投入静湖的石子。${pick(best)}。${pick(filler)}。${style}的气息在四周弥漫开来，下一个瞬间，你必须决定——是进，还是退？`,
-      () => `${pick(best)}。时间在这一刻被拉得很长。${pick(filler)}。命运似乎在你耳边低语：这条路上，没有后悔药，只有下一个选择。`
-    ];
-
-    const narration = pick(templates)();
-    const suggestions = [
-      `仔细观察周围，寻找可疑之处`,
-      `尝试与最近的人物搭话`,
-      `检查随身携带的物品`,
-      `保持警惕，继续向前`,
-      `回忆原著中关于此地的记载`
-    ];
-    res.json({
-      content: JSON.stringify({
-        narration,
-        suggestions: shuffle(suggestions).slice(0, 3),
-        mood: pick(['紧张', '平静', '诡谲', '激昂', '期待'])
-      })
-    });
+    res.json({ content: JSON.stringify(mockNarrate(req.body)) });
   } catch (e) {
     res.status(500).json({ error: '演示生成失败：' + e.message });
   }
 });
+
+/* 演示：剧情续写（JSON 对象：narration/suggestions/mood） */
+function mockNarrate({ context, world, userInput, chapterTitle }) {
+  const text = (context && context.text) || '';
+  const sentences = splitSentences(text);
+
+  // 1. 找出与用户输入最相关的原文句子（简单词重叠打分）
+  const keywords = (userInput || '').replace(/[，。！？、,.!?]/g, ' ').split(/\s+/).filter(w => w.length >= 2);
+  let best = [];
+  if (keywords.length) {
+    best = sentences
+      .map(s => ({ s, score: keywords.reduce((acc, k) => acc + (s.includes(k) ? 1 : 0), 0) }))
+      .filter(x => x.score > 0)
+      .sort((a, b) => b.score - a.score)
+      .slice(0, 3)
+      .map(x => x.s);
+  }
+  // 2. 补充随机环境描写句
+  const filler = shuffle(sentences).slice(0, 2);
+
+  const worldName = (world && world.name) || '这个世界';
+  const protagonist = (world && world.protagonist) || '你';
+  const style = (world && world.style) || '奇幻冒险';
+
+  const templates = [
+    () => `${pick(best)}。空气仿佛凝固了一瞬，${protagonist}能清楚地听见自己的心跳。${pick(filler)}。事情的发展显然脱离了所有人的预料——包括你。`,
+    () => `就在你行动的瞬间，${pick(best)}。${pick(filler)}。这就是${worldName}的法则：每一个选择都会留下痕迹，而你刚刚写下的一笔，恐怕比想象中更深。`,
+    () => `${pick(best)}。远处传来若有若无的回响，像是回应，又像是警告。${pick(filler)}。你知道，从这一刻起，「${chapterTitle || '故事'}」的走向已经改变。`,
+    () => `你的行动像一颗投入静湖的石子。${pick(best)}。${pick(filler)}。${style}的气息在四周弥漫开来，下一个瞬间，你必须决定——是进，还是退？`,
+    () => `${pick(best)}。时间在这一刻被拉得很长。${pick(filler)}。命运似乎在你耳边低语：这条路上，没有后悔药，只有下一个选择。`
+  ];
+
+  const narration = pick(templates)();
+  const suggestions = [
+    `仔细观察周围，寻找可疑之处`,
+    `尝试与最近的人物搭话`,
+    `检查随身携带的物品`,
+    `保持警惕，继续向前`,
+    `回忆原著中关于此地的记载`
+  ];
+  return {
+    narration,
+    suggestions: shuffle(suggestions).slice(0, 3),
+    mood: pick(['紧张', '平静', '诡谲', '激昂', '期待'])
+  };
+}
+
+/* 演示：记忆压缩（把近期行动拼成「故事至今」摘要） */
+function mockSummarize({ world, chapterTitle, history }) {
+  const acts = (history || [])
+    .filter(h => h.role === 'user')
+    .slice(-12)
+    .map(h => h.content.slice(0, 40));
+  const events = (history || [])
+    .filter(h => h.role === 'ai')
+    .slice(-12)
+    .map(h => h.content.slice(0, 50));
+  return `【故事至今 · 演示摘要】
+你以「${(world && world.protagonist) || '主角'}」的身份踏入${(world && world.name) || '这个故事'}，至今已做出 ${acts.length} 次关键行动。
+主要行动：${acts.length ? acts.map((a, i) => `${i + 1}. ${a}`).join('；') : '（尚无记录）'}
+世界回应：${events.length ? events.slice(0, 3).join(' / ') : '风云暗涌，一切尚未明朗。'}
+当前你身处「${chapterTitle || '未知章节'}」，命运的丝线正悄然收紧。`;
+}
 
 function splitSentences(text) {
   return text
@@ -210,6 +234,107 @@ function shuffle(arr) {
 function pick(arr) {
   return arr.length ? arr[Math.floor(Math.random() * arr.length)] : '风穿过空旷的街巷，卷起几片落叶';
 }
+function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
+
+/* ---------------- SSE 流式代理（OpenAI 兼容） ----------------
+ * 真实模式：上游 stream:true，增量转发 delta
+ * 演示模式：本地生成完整内容后分片推送，模拟打字机
+ * 事件协议：{delta} 增量 → {done:true, content, usage} 结束 → {error} 失败
+ */
+app.post('/api/ai/stream', async (req, res) => {
+  const { baseUrl, apiKey, model, messages, temperature = 0.8, maxTokens = 800, mock = false, mockBody = null } = req.body || {};
+
+  res.setHeader('Content-Type', 'text/event-stream; charset=utf-8');
+  res.setHeader('Cache-Control', 'no-cache, no-transform');
+  res.setHeader('Connection', 'keep-alive');
+  res.setHeader('X-Accel-Buffering', 'no');
+  res.flushHeaders && res.flushHeaders();
+
+  const send = obj => { try { res.write('data: ' + JSON.stringify(obj) + '\n\n'); } catch {} };
+  // 注意：Node 18+ 中 req 的 'close' 在请求体接收完即触发，
+  // 客户端是否真正离开必须监听 res 的 'close'
+  let clientGone = false;
+  res.on('close', () => { clientGone = true; });
+
+  try {
+    if (mock || !(baseUrl && apiKey && model)) {
+      // ---- 演示模式：完整生成 + 分片假流式 ----
+      const action = (mockBody && mockBody.action) || 'narrate';
+      const content = action === 'summarize'
+        ? mockSummarize(mockBody || {})
+        : JSON.stringify(mockNarrate(mockBody || {}));
+      const fakeUsage = {
+        prompt_tokens: Math.ceil((JSON.stringify(messages || []).length) / 2),
+        completion_tokens: Math.ceil(content.length / 2),
+        mock: true
+      };
+      // 按 2-5 字符分片，15-35ms 间隔，模拟真实生成节奏
+      let i = 0;
+      while (i < content.length && !clientGone) {
+        const step = 2 + Math.floor(Math.random() * 4);
+        send({ delta: content.slice(i, i + step) });
+        i += step;
+        await sleep(15 + Math.random() * 20);
+      }
+      send({ done: true, content, usage: fakeUsage });
+      return res.end();
+    }
+
+    // ---- 真实模式：透传上游流 ----
+    const url = baseUrl.replace(/\/+$/, '') + '/chat/completions';
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 90000);
+    res.on('close', () => controller.abort());
+
+    const upstream = await fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + apiKey },
+      body: JSON.stringify({ model, messages, temperature, max_tokens: maxTokens, stream: true, stream_options: { include_usage: true } }),
+      signal: controller.signal
+    });
+    clearTimeout(timer);
+
+    if (!upstream.ok) {
+      const errText = await upstream.text();
+      send({ error: `上游接口错误 ${upstream.status}: ${errText.slice(0, 300)}` });
+      return res.end();
+    }
+
+    const reader = upstream.body.getReader();
+    const decoder = new TextDecoder();
+    let buffer = '';
+    let full = '';
+    let usage = null;
+
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done || clientGone) break;
+      buffer += decoder.decode(value, { stream: true });
+      const lines = buffer.split('\n');
+      buffer = lines.pop() || '';
+      for (const line of lines) {
+        const trimmed = line.trim();
+        if (!trimmed.startsWith('data:')) continue;
+        const payload = trimmed.slice(5).trim();
+        if (!payload || payload === '[DONE]') continue;
+        try {
+          const json = JSON.parse(payload);
+          const delta = json.choices && json.choices[0] && json.choices[0].delta
+            ? (json.choices[0].delta.content || '') : '';
+          if (delta) { full += delta; send({ delta }); }
+          if (json.usage) usage = json.usage;
+        } catch { /* 忽略不完整行 */ }
+      }
+    }
+    send({ done: true, content: full, usage });
+    res.end();
+  } catch (e) {
+    if (!clientGone) {
+      send({ error: e.name === 'AbortError' ? '生成已停止或超时' : ('流式请求失败：' + e.message) });
+    }
+    try { res.end(); } catch {}
+  }
+});
 
 /* ---------------- 前端路由兜底 ---------------- */
 app.get('*', (req, res) => {
