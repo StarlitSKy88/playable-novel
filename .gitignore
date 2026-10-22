@@ -4,3 +4,7 @@ npm-debug.log*
 .env
 *.log
 assets-src
+
+# WorkBuddy 应用标记（本地使用，不入库）
+.wbapp_*.genie
+.workbuddy/
