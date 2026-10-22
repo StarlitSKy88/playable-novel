@@ -955,6 +955,41 @@ body.booting .panel.active { animation: none; }
    世界书弹窗 / 导出弹窗 / 插画 / 本地模式提示
    ============================================================ */
 .modal-wide { width: min(680px, 100%); }
+.modal-narrow { width: min(420px, 100%); }
+
+/* ---- 云服务登录弹窗 / 云端存档 ---- */
+.modal-body input[type="email"] { width: 100%; }
+.modal-body select {
+  width: 100%; padding: 9px 12px; margin-top: 6px;
+  background: var(--panel-2); color: var(--text);
+  border: 1px solid var(--border); border-radius: var(--r-sm);
+  font-family: var(--sans); font-size: 13px;
+}
+.modal-body select:focus { outline: none; border-color: var(--accent); }
+.otp-row { display: flex; gap: 8px; align-items: center; }
+.otp-row input { flex: 1; }
+.cloud-tip {
+  margin-top: 12px; min-height: 18px;
+  font-size: 12.5px; line-height: 1.6; color: var(--text-dim);
+}
+.cloud-tip.err { color: var(--danger); }
+.cloud-tip.ok { color: var(--good); }
+.cloud-btn.signed { color: var(--text); border-color: var(--border-strong); }
+.modal-foot { justify-content: flex-end; }
+.modal-foot .btn.ghost { margin-right: auto; }
+.cloud-save-item {
+  display: flex; align-items: center; gap: 8px;
+  padding: 7px 10px; margin-bottom: 6px;
+  border: 1px solid var(--border); border-radius: var(--r-sm);
+  background: rgba(255, 255, 255, .03);
+  font-size: 12.5px; cursor: pointer;
+  transition: border-color .2s var(--ease), background .2s var(--ease);
+}
+.cloud-save-item:hover { border-color: var(--border-strong); background: rgba(255, 255, 255, .06); }
+.cloud-save-item .cs-title { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.cloud-save-item .cs-meta { color: var(--text-faint); font-size: 11.5px; }
+.cloud-save-item .cs-del { color: var(--text-faint); padding: 0 4px; }
+.cloud-save-item .cs-del:hover { color: var(--danger); }
 .wb-actions { align-items: center; margin-bottom: 14px; }
 .wb-count { font-size: 12px; color: var(--text-dim); }
 .wb-list { display: flex; flex-direction: column; gap: 8px; max-height: 290px; overflow-y: auto; margin-bottom: 18px; }

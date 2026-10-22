@@ -30,6 +30,7 @@
       </div>
     </div>
     <div class="topbar-actions">
+      <button id="btnCloud" class="btn ghost cloud-btn">云端登录</button>
       <span id="modeBadge" class="mode-badge demo">演示模式</span>
       <a class="star-btn" href="https://github.com/StarlitSKy88/playable-novel" target="_blank" rel="noopener" title="觉得不错？给个 Star 支持开源！">
         <span class="star-icon" aria-hidden="true">
@@ -207,11 +208,11 @@
     <!-- ========== 右侧：状态面板 ========== -->
     <aside class="sidebar" id="sidebar">
       <div class="side-block">
-        <h4>📜 当前世界</h4>
+        <h4>当前世界</h4>
         <div id="sideWorld" class="side-empty">尚未加载小说</div>
       </div>
       <div class="side-block">
-        <h4>🧭 剧情进度</h4>
+        <h4>剧情进度</h4>
         <div id="sideProgress" class="side-empty">未开始</div>
       </div>
       <div class="side-block">
@@ -232,15 +233,20 @@
         <div class="timeline-list" id="timelineList"><div class="side-empty">尚无存档 · 剧情推进中自动创建快照</div></div>
       </div>
       <div class="side-block">
-        <h4>💰 成本统计</h4>
+        <h4>云端存档 <span class="side-hint" id="cloudSavesMeta"></span></h4>
+        <div class="timeline-list" id="cloudSavesList"><div class="side-empty">登录后可把进度同步到云端，换设备也能接着读</div></div>
+        <button id="btnCloudSave" class="btn small ghost wb-open">把当前进度存到云端</button>
+      </div>
+      <div class="side-block">
+        <h4>成本统计</h4>
         <div id="sideUsage" class="side-empty">尚未产生调用</div>
       </div>
       <div class="side-block">
-        <h4>💠 已触发事件</h4>
+        <h4>已触发事件</h4>
         <ul id="sideEvents" class="side-events"><li class="side-empty">暂无</li></ul>
       </div>
       <div class="side-block side-tips">
-        <h4>💡 玩法说明</h4>
+        <h4>玩法说明</h4>
         <ul>
           <li>上传任意小说，AI 自动提取设定</li>
           <li>选择章节入口与扮演角色</li>
@@ -259,6 +265,31 @@
     <div>开源 · BYOK · 数据本地 · MIT License</div>
     <div class="footer-star">觉得不错？<a href="https://github.com/StarlitSKy88/playable-novel" target="_blank" rel="noopener">去 GitHub 点个 Star</a> · 参加 WorkBuddy 1024 造物挑战</div>
   </footer>
+
+  <!-- ========== 云服务登录弹窗（邮箱验证码，无密码） ========== -->
+  <div class="modal-mask" id="cloudModal">
+    <div class="modal modal-narrow">
+      <div class="modal-head">
+        <h3>云端登录</h3>
+        <button class="modal-close" id="btnCloseCloud">✕</button>
+      </div>
+      <div class="modal-body">
+        <p class="modal-desc" id="cloudDesc">登录后可将小说进度、世界书与分支快照同步到云端，换设备继续读。使用邮箱验证码登录，无需密码。</p>
+        <label>邮箱</label>
+        <input id="cloudEmail" type="email" placeholder="you@example.com" autocomplete="email" />
+        <label>验证码</label>
+        <div class="otp-row">
+          <input id="cloudCode" type="text" inputmode="numeric" placeholder="6 位验证码" />
+          <button id="btnCloudSend" class="btn small" type="button">获取验证码</button>
+        </div>
+        <p class="cloud-tip" id="cloudTip"></p>
+      </div>
+      <div class="modal-foot">
+        <button id="btnCloudSignOut" class="btn small ghost" hidden>退出登录</button>
+        <button id="btnCloudSubmit" class="btn primary">登录 / 注册</button>
+      </div>
+    </div>
+  </div>
 
   <!-- ========== API 设置弹窗 ========== -->
   <div class="modal-mask" id="settingsModal">
@@ -282,6 +313,10 @@
           <button class="chip" data-preset="qwen">通义千问</button>
           <button class="chip" data-preset="kimi">Kimi</button>
           <button class="chip" data-preset="ollama">Ollama 本地</button>
+        </div>
+        <div class="toggle-row" id="cloudModelRow">
+          <label for="cfgCloudModel">云端模型（免密钥，未填 Key 时使用）</label>
+          <select id="cfgCloudModel"><option value="">加载中…</option></select>
         </div>
         <div class="toggle-row">
           <label class="switch">
@@ -408,9 +443,15 @@
   <!-- Toast -->
   <div class="toast" id="toast"></div>
 
+  <!-- 云服务 SDK：纯 HTML 项目用 IIFE 全局构建（同 CDN 产物，此处本地托管，
+       保证 file:// 离线打开与无 CDN 网络时应用依然完整）。
+       加载失败时 window.WorkBuddyCloud 不存在，cloud.js 会自动让应用回退本地模式。
+       版本：@tencent-ai/workbuddy-cloud-sdk 0.1.4-dev.ca27990（dev 通道） -->
+  <script src="vendor/workbuddy-cloud-sdk.global.js"></script>
   <script src="storage.js"></script>
   <script src="mock-engine.js"></script>
   <script src="parsers.js"></script>
+  <script src="cloud.js"></script>
   <script src="app.js"></script>
   <script src="starfield.js"></script>
   <script src="motion.js"></script>

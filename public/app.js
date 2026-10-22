@@ -33,6 +33,11 @@ const state = {
 /* 后端可用性：null=未探测 true=可用 false=纯本地模式（无 Node 后端） */
 let BACKEND_OK = null;
 
+/* 云服务状态：null=未探测 true=可用 false=不可用（离线 / SDK 未加载） */
+let CLOUD_OK = null;
+/* 云端会话：登录后为 session 对象 */
+let cloudSession = null;
+
 const $ = id => document.getElementById(id);
 
 /* ---------------- 初始化 ---------------- */
@@ -45,6 +50,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   bindWorld();
   bindChapters();
   bindPlay();
+  bindCloud();
   refreshModeBadge();
   await restoreProgress();
   await loadWorldbook();
@@ -92,12 +98,218 @@ function refreshModeBadge() {
   if (hasLiveKey()) {
     badge.textContent = (BACKEND_OK === false ? '本地直连 · ' : '已连接 ') + state.config.model;
     badge.className = 'mode-badge live';
+  } else if (CLOUD_OK === true) {
+    // 没填自己的 Key，但云服务可用 → 走云端免密钥模型
+    badge.textContent = '云端模型' + (PNCloud && PNCloud.llm.currentModel() ? ' · ' + PNCloud.llm.currentModel() : '');
+    badge.className = 'mode-badge live';
   } else if (BACKEND_OK === false) {
     badge.textContent = '本地模式';
     badge.className = 'mode-badge local';
   } else {
     badge.textContent = '演示模式';
     badge.className = 'mode-badge demo';
+  }
+}
+
+/* ============================================================
+ * 云服务：登录（邮箱验证码） + 云端存档 + 免密钥模型通道
+ * ============================================================ */
+let cloudPending = null;   // 发送验证码后保存的 challenge（提交时复用，绝不重新发码）
+
+async function bindCloud() {
+  if (!window.PNCloud) return;
+  const st = await PNCloud.status();
+  CLOUD_OK = st.ready;
+  if (!CLOUD_OK) {
+    markCloudDown(st.reason);
+    return;
+  }
+  // 真正探一次数据面：模型列表取不到就视为不可用（例如非发布域名打开），
+  // 这样后续生成不会每轮都弹一次失败提示。
+  try {
+    const models = await PNCloud.llm.listModels();
+    if (!models.length) { markCloudDown('云端暂无可用模型'); return; }
+    if (state.config.cloudModel) PNCloud.llm.setModel(state.config.cloudModel);
+    await PNCloud.llm.pickModel();
+    CLOUD_OK = true;
+  } catch (e) {
+    markCloudDown(e.message || '云服务数据面不可达');
+    return;
+  }
+
+  $('btnCloud').onclick = () => openCloudModal();
+  $('btnCloseCloud').onclick = () => $('cloudModal').classList.remove('open');
+  $('cloudModal').onclick = e => { if (e.target.id === 'cloudModal') e.target.classList.remove('open'); };
+
+  // 获取验证码：单独绑定，发送中与倒计时期间不发第二次
+  $('btnCloudSend').onclick = async () => {
+    const email = $('cloudEmail').value.trim();
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) { cloudTip('请输入正确的邮箱地址', 'err'); return; }
+    const btn = $('btnCloudSend');
+    btn.disabled = true;
+    try {
+      cloudPending = await PNCloud.auth.sendCode(email);
+      cloudTip('验证码已发送到该邮箱，请查收后填入。', 'ok');
+      let left = 60;
+      btn.textContent = left + ' 秒后重发';
+      const timer = setInterval(() => {
+        left -= 1;
+        if (left <= 0) { clearInterval(timer); btn.textContent = '重发验证码'; btn.disabled = false; }
+        else btn.textContent = left + ' 秒后重发';
+      }, 1000);
+    } catch (e) {
+      cloudPending = null;
+      cloudTip(e.message || '验证码发送失败', 'err');
+      btn.disabled = false;
+    }
+  };
+
+  // 登录 / 注册：复用已保存的 challenge，只提交验证码
+  $('btnCloudSubmit').onclick = async () => {
+    if (!cloudPending) { cloudTip('请先点击「获取验证码」', 'err'); return; }
+    const token = $('cloudCode').value.trim();
+    if (!token) { cloudTip('请输入验证码', 'err'); return; }
+    $('btnCloudSubmit').disabled = true;
+    try {
+      await PNCloud.auth.verifyCode(cloudPending, token);
+      cloudPending = null;
+      $('cloudCode').value = '';
+      cloudTip('登录成功', 'ok');
+      await refreshCloudSession();
+      $('cloudModal').classList.remove('open');
+      toast('已登录 · 云端存档与免密钥模型已就绪');
+    } catch (e) {
+      cloudTip(e.message || '登录失败，请检查验证码', 'err');
+    } finally {
+      $('btnCloudSubmit').disabled = false;
+    }
+  };
+
+  $('btnCloudSignOut').onclick = async () => {
+    await PNCloud.auth.signOut();
+    cloudSession = null;
+    renderCloudButton();
+    renderCloudSaves([]);
+    cloudTip('已退出登录', 'ok');
+  };
+
+  $('btnCloudSave').onclick = () => saveCurrentToCloud();
+  $('cloudEmail').oninput = () => { if (cloudPending && cloudPending.email !== $('cloudEmail').value.trim()) cloudPending = null; };
+
+  await refreshCloudSession();
+}
+
+/* 云服务置为不可用：按钮给出原因，后续生成直接走本地通道，不反复报错 */
+function markCloudDown(reason) {
+  CLOUD_OK = false;
+  console.info('[Playable Novel] 云服务不可用：' + reason + '（已回退本地模式）');
+  const btn = $('btnCloud');
+  if (btn) { btn.textContent = '云服务未连接'; btn.title = reason; btn.disabled = true; }
+  renderCloudSaves([]);
+  refreshModeBadge();
+}
+
+function cloudTip(msg, kind) {
+  const el = $('cloudTip');
+  if (!el) return;
+  el.textContent = msg || '';
+  el.className = 'cloud-tip' + (kind ? ' ' + kind : '');
+}
+
+function openCloudModal() {
+  cloudTip('', '');
+  $('cloudModal').classList.add('open');
+  if (cloudSession) {
+    const u = cloudSession.user || {};
+    cloudTip('当前已登录：' + (u.name || '已登录用户'), 'ok');
+  }
+}
+
+async function refreshCloudSession() {
+  if (!window.PNCloud || CLOUD_OK !== true) return;
+  cloudSession = await PNCloud.auth.getSession();
+  renderCloudButton();
+  if (cloudSession) {
+    try { renderCloudSaves(await PNCloud.saves.list()); }
+    catch (e) { $('cloudSavesMeta').textContent = ''; renderCloudSaves([]); console.warn('[cloud] list failed:', e.message); }
+  } else {
+    renderCloudSaves([]);
+  }
+  refreshModeBadge();
+}
+
+function renderCloudButton() {
+  const btn = $('btnCloud');
+  if (!btn) return;
+  if (cloudSession) {
+    const u = cloudSession.user || {};
+    btn.textContent = u.name || '已登录';
+    btn.classList.add('signed');
+    btn.title = '点击管理云端登录与存档';
+    $('btnCloudSignOut').hidden = false;
+  } else {
+    btn.textContent = '云端登录';
+    btn.classList.remove('signed');
+    if ($('btnCloudSignOut')) $('btnCloudSignOut').hidden = true;
+  }
+}
+
+function renderCloudSaves(rows) {
+  const box = $('cloudSavesList');
+  const meta = $('cloudSavesMeta');
+  if (!box) return;
+  if (!cloudSession) { meta.textContent = '未登录'; box.innerHTML = '<div class="side-empty">登录后可把进度同步到云端</div>'; return; }
+  meta.textContent = rows.length ? rows.length + ' 条' : '空';
+  if (!rows.length) { box.innerHTML = '<div class="side-empty">还没有云端存档</div>'; return; }
+  box.innerHTML = '';
+  rows.forEach(r => {
+    const el = document.createElement('div');
+    el.className = 'cloud-save-item';
+    const title = document.createElement('span');
+    title.className = 'cs-title';
+    title.textContent = r.novel_title;
+    const meta2 = document.createElement('span');
+    meta2.className = 'cs-meta';
+    meta2.textContent = '第 ' + ((r.chapter_index || 0) + 1) + ' 章 · ' + new Date(r.created_at).toLocaleDateString();
+    const del = document.createElement('span');
+    del.className = 'cs-del';
+    del.textContent = '✕';
+    del.title = '删除这条云端存档';
+    del.onclick = async e => {
+      e.stopPropagation();
+      try {
+        const ok = await PNCloud.saves.remove(r.id);
+        toast(ok ? '已删除云端存档' : '删除失败：该存档可能不存在或不属于当前账号');
+        renderCloudSaves(await PNCloud.saves.list());
+      } catch (err) { toast(err.message || '删除失败'); }
+    };
+    el.appendChild(title); el.appendChild(meta2); el.appendChild(del);
+    box.appendChild(el);
+  });
+}
+
+/* 把当前进度（章节 + 历史 + 世界书 + 分支）存到云端 */
+async function saveCurrentToCloud() {
+  if (!window.PNCloud || CLOUD_OK !== true) { toast('云服务未连接：当前处于离线状态或 SDK 未加载'); return; }
+  if (!cloudSession) { toast('请先登录，再同步到云端'); openCloudModal(); return; }
+  if (!state.novel) { toast('还没有加载小说，先上传或粘贴一本'); return; }
+  try {
+    await PNCloud.saves.save({
+      novelTitle: state.novel.title || '未命名小说',
+      chapterIndex: state.entryChapter || 0,
+      payload: {
+        chapters: (state.novel.chapters || []).map(c => ({ title: c.title, preview: (c.content || '').slice(0, 200) })),
+        history: (state.history || []).slice(-20),
+        worldbook: state.worldbook || [],
+        branchId: state.branchId || null,
+        savedAt: new Date().toISOString()
+      }
+    });
+    toast('已同步到云端');
+    renderCloudSaves(await PNCloud.saves.list());
+  } catch (e) {
+    toast(e.message || '云端同步失败');
+    if (e.needLogin) { cloudSession = null; renderCloudButton(); openCloudModal(); }
   }
 }
 
@@ -114,6 +326,7 @@ function bindSettings() {
     $('localModeTip').style.display = BACKEND_OK === false ? '' : 'none';
     $('settingsModal').classList.add('open');
   };
+  fillCloudModelOptions();
   $('btnCloseSettings').onclick = () => $('settingsModal').classList.remove('open');
   $('settingsModal').onclick = e => { if (e.target.id === 'settingsModal') e.target.classList.remove('open'); };
 
@@ -826,6 +1039,37 @@ async function runGeneration(messages, opts = {}) {
     const m = createStoryMessage();
     msgEl = bindHid(m.el); bodyEl = m.body;
     renderStreamText(bodyEl, '', true);
+
+    // 云端免密钥模型：没填自己的 Key 时优先走真实大模型（真流式）
+    if (cloudStreamAvailable()) {
+      try {
+        const r = await PNCloud.llm.chat({
+          messages, temperature, maxTokens,
+          signal: state.genAbort.signal,
+          onDelta: d => {
+            buffer += d;
+            renderStreamText(bodyEl, mode === 'story' ? streamPreview(buffer) : buffer, true);
+          }
+        });
+        if (r && r.content) buffer = r.content;
+        usage = r && r.usage ? {
+          prompt_tokens: r.usage.prompt_tokens || 0,
+          completion_tokens: r.usage.completion_tokens || 0,
+          cloud: true
+        } : null;
+        CLOUD_OK = true;
+        refreshModeBadge();
+        return finalize();
+      } catch (e) {
+        if (e && e.name === 'AbortError') {
+          return buffer ? finalize() : (msgEl && msgEl.remove(), null);
+        }
+        CLOUD_OK = false;
+        refreshModeBadge();
+        toast('云端模型不可用：' + (e.message || '未知错误') + '，已回退演示模式');
+        // 继续往下走本地演示通道，不静默失败
+      }
+    }
 
     // 本地模式（无 Node 后端）：本地生成 + 前端分片假流式
     if (BACKEND_OK === false) {
@@ -1576,6 +1820,48 @@ function hashStr(s) {
  * AI 调用（三通道：Node 代理 / 浏览器直连 / 本地演示引擎）
  * 返回 { content, usage }
  * ============================================================ */
+/* 云端模型下拉：让用户自己选免密钥模型（默认已挑低延迟的） */
+async function fillCloudModelOptions() {
+  const sel = $('cfgCloudModel');
+  if (!sel) return;
+  if (!window.PNCloud || CLOUD_OK === false) {
+    $('cloudModelRow').style.display = 'none';
+    return;
+  }
+  $('cloudModelRow').style.display = '';
+  try {
+    const models = await PNCloud.llm.listModels();
+    const cur = state.config.cloudModel || PNCloud.llm.currentModel() || '';
+    sel.innerHTML = '';
+    models.forEach(m => {
+      const op = document.createElement('option');
+      op.value = m.id;
+      op.textContent = (m.name || m.id) + (m.credits ? ' · ' + m.credits : '');
+      if (m.id === cur) op.selected = true;
+      sel.appendChild(op);
+    });
+    if (cur && !models.some(m => m.id === cur)) {
+      const op = document.createElement('option');
+      op.value = cur; op.textContent = cur + '（当前）'; op.selected = true;
+      sel.insertBefore(op, sel.firstChild);
+    }
+    sel.onchange = async () => {
+      state.config.cloudModel = sel.value;
+      await saveConfig(state.config);
+      if (window.PNCloud) PNCloud.llm.setModel(sel.value);
+      refreshModeBadge();
+      toast('云端模型已切换为 ' + sel.value);
+    };
+  } catch (e) {
+    sel.innerHTML = '<option value="">云端模型不可用</option>';
+  }
+}
+
+/* 云服务通道是否值得一试：没自带 Key，且云服务没被判定为不可用 */
+function cloudStreamAvailable() {
+  return !!window.PNCloud && CLOUD_OK !== false && !hasLiveKey();
+}
+
 async function callAI(messages, temperature = 0.8, maxTokens = 800, mockAction = 'narrate', mockUserText = '') {
   if (hasLiveKey()) {
     // 优先走 Node 代理（规避 CORS、Key 不暴露在页面网络面板）
@@ -1602,7 +1888,28 @@ async function callAI(messages, temperature = 0.8, maxTokens = 800, mockAction =
     }
     return directCallAI(messages, temperature, maxTokens);
   }
-  // 演示模式：本地引擎优先，无后端时也能跑
+  // 无自带 Key：先试云端免密钥模型，失败再回退本地演示引擎
+  if (cloudStreamAvailable()) {
+    try {
+      const r = await PNCloud.llm.chat({ messages, temperature, maxTokens });
+      if (r && r.content) {
+        CLOUD_OK = true;
+        refreshModeBadge();
+        return {
+          content: r.content,
+          usage: r.usage ? {
+            prompt_tokens: r.usage.prompt_tokens || 0,
+            completion_tokens: r.usage.completion_tokens || 0,
+            cloud: true
+          } : null
+        };
+      }
+    } catch (e) {
+      CLOUD_OK = false;
+      refreshModeBadge();
+      console.warn('[cloud] 调用失败：', e.message);
+    }
+  }
   return localMock(mockAction, mockUserText);
 }
 
