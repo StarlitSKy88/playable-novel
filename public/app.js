@@ -98,9 +98,9 @@ function refreshModeBadge() {
   if (hasLiveKey()) {
     badge.textContent = (BACKEND_OK === false ? '本地直连 · ' : '已连接 ') + state.config.model;
     badge.className = 'mode-badge live';
-  } else if (CLOUD_OK === true) {
-    // 没填自己的 Key，但云服务可用 → 走云端免密钥模型
-    badge.textContent = '云端模型' + (PNCloud && PNCloud.llm.currentModel() ? ' · ' + PNCloud.llm.currentModel() : '');
+  } else if (CLOUD_OK === true && cloudTrialEnabled() && cloudTrialLeft() > 0) {
+    // 用户显式开启、且还有体验次数 → 明确标出「体验」与剩余次数（花的是应用额度）
+    badge.textContent = '云端体验 · 剩 ' + cloudTrialLeft() + ' 次';
     badge.className = 'mode-badge live';
   } else if (BACKEND_OK === false) {
     badge.textContent = '本地模式';
@@ -319,6 +319,7 @@ function bindSettings() {
     $('cfgApiKey').value = state.config.apiKey || '';
     $('cfgModel').value = state.config.model || '';
     $('cfgUseMock').checked = state.config.useMock !== false;
+    if ($('cfgCloudTrial')) $('cfgCloudTrial').checked = state.config.cloudTrial === true;
     $('cfgStream').checked = state.config.stream !== false;
     $('cfgImageKey').value = state.config.imageApiKey || '';
     const curImg = state.config.imageProvider || 'none';
@@ -377,6 +378,9 @@ function bindSettings() {
       model: $('cfgModel').value.trim(),
       useMock: $('cfgUseMock').checked,
       stream: $('cfgStream').checked,
+      /* 云端通道：默认关闭；开关状态与所选模型必须一起持久化 */
+      cloudTrial: !!($('cfgCloudTrial') && $('cfgCloudTrial').checked),
+      cloudModel: state.config.cloudModel || '',
       imageProvider: (document.querySelector('.chip[data-img].active') || {}).dataset ? (document.querySelector('.chip[data-img].active') || {}).dataset.img : 'none',
       imageApiKey: $('cfgImageKey').value.trim(),
       outputLang: (document.querySelector('.chip[data-lang].active') || {}).dataset
@@ -384,7 +388,9 @@ function bindSettings() {
         : (state.outputLang || 'auto')
     });
     $('settingsModal').classList.remove('open');
-    toast(hasLiveKey() ? '✅ 已连接真实大模型，开始你的故事吧' : '⚙️ 已保存，未配置 Key 时将使用演示模式');
+    toast(hasLiveKey()
+      ? '已连接你自己的 API Key，开始你的故事吧'
+      : (cloudTrialEnabled() ? '已开启云端体验（消耗应用额度，剩 ' + cloudTrialLeft() + ' 次）' : '已保存：未填 Key 时使用本地演示模式'));
   };
   $('btnClearSettings').onclick = async () => {
     await DB.clear(PN_STORE.config);
@@ -1068,7 +1074,7 @@ async function runGeneration(messages, opts = {}) {
           cloud: true
         } : null;
         CLOUD_OK = true;
-        refreshModeBadge();
+        bumpCloudTrial();   // 一次成功调用 = 消耗一次应用额度
         return finalize();
       } catch (e) {
         if (e && e.name === 'AbortError') {
@@ -1873,9 +1879,42 @@ async function fillCloudModelOptions() {
   }
 }
 
-/* 云服务通道是否值得一试：没自带 Key，且云服务没被判定为不可用 */
+/* ============================================================
+ * 云端模型通道的「谁付钱」策略
+ * ------------------------------------------------------------
+ * 免密钥通道消耗的是**应用所有者的云服务额度**（按 credits 计费）。
+ * 因此它不能是默认通道：
+ *   ① 默认关闭，必须用户在设置里显式勾选「使用云端体验」；
+ *   ② 即使开启，也只给每浏览器固定次数（CLOUD_TRIAL_LIMIT），用完自动回退演示；
+ *   ③ 有自己 Key 的用户永远走自己的 Key，不碰应用额度。
+ * ============================================================ */
+const CLOUD_TRIAL_LIMIT = 6;
+const CLOUD_TRIAL_KEY = 'pn_cloud_trial_used';
+
+function cloudTrialUsed() {
+  const n = parseInt(localStorage.getItem(CLOUD_TRIAL_KEY) || '0', 10);
+  return Number.isFinite(n) && n > 0 ? n : 0;
+}
+function cloudTrialLeft() {
+  return Math.max(0, CLOUD_TRIAL_LIMIT - cloudTrialUsed());
+}
+function cloudTrialEnabled() {
+  return state.config && state.config.cloudTrial === true;
+}
+function bumpCloudTrial() {
+  const n = cloudTrialUsed() + 1;
+  try { localStorage.setItem(CLOUD_TRIAL_KEY, String(n)); } catch { /* 隐私模式忽略 */ }
+  if (cloudTrialLeft() === 0) {
+    toast('云端体验次数已用完，已切回演示模式；填入自己的 API Key 可继续使用真实模型', 4200);
+  }
+  refreshModeBadge();
+  return cloudTrialLeft();
+}
+
+/* 云端通道是否可用：SDK 就绪 + 没自带 Key + 用户显式开启 + 还有剩余次数 */
 function cloudStreamAvailable() {
-  return !!window.PNCloud && CLOUD_OK !== false && !hasLiveKey();
+  return !!window.PNCloud && CLOUD_OK !== false && !hasLiveKey()
+    && cloudTrialEnabled() && cloudTrialLeft() > 0;
 }
 
 async function callAI(messages, temperature = 0.8, maxTokens = 800, mockAction = 'narrate', mockUserText = '') {
@@ -1910,7 +1949,7 @@ async function callAI(messages, temperature = 0.8, maxTokens = 800, mockAction =
       const r = await PNCloud.llm.chat({ messages, temperature, maxTokens });
       if (r && r.content) {
         CLOUD_OK = true;
-        refreshModeBadge();
+        bumpCloudTrial();
         return {
           content: r.content,
           usage: r.usage ? {

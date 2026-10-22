@@ -314,6 +314,13 @@
           <button class="chip" data-preset="kimi">Kimi</button>
           <button class="chip" data-preset="ollama">Ollama 本地</button>
         </div>
+        <div class="toggle-row">
+          <label class="switch">
+            <input type="checkbox" id="cfgCloudTrial" />
+            <span>未填 Key 时使用应用云端额度体验真实模型（每浏览器最多 6 次，用完自动回退演示）</span>
+          </label>
+        </div>
+        <p class="settings-hint">默认不开：这条通道消耗的是<strong>应用所有者的云服务额度</strong>。有自己 Key 时永远优先走你的 Key，不碰这里。</p>
         <div class="toggle-row" id="cloudModelRow">
           <label for="cfgCloudModel">云端模型（免密钥，未填 Key 时使用）</label>
           <select id="cfgCloudModel"><option value="">加载中…</option></select>

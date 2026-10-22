@@ -53,7 +53,11 @@ const PAGE_HELPERS = () => {
       state.sourceLang = null;
       state.genAbort = null;
       state._lastUserInput = '';
-      state.config = Object.assign({}, state.config, { apiKey: '', baseUrl: '', model: '', stream: true });
+      state.config = Object.assign({}, state.config, {
+        apiKey: '', baseUrl: '', model: '', stream: true,
+        cloudTrial: opts.cloudTrial !== false
+      });
+      try { localStorage.removeItem('pn_cloud_trial_used'); } catch (e) {}
       CLOUD_OK = true;
       document.getElementById('storyFlow').innerHTML = '';
       document.getElementById('actionInput').value = '';
@@ -430,6 +434,42 @@ async function main() {
     });
     check('IMP-12', '空输入不发请求', empty.called === 0, `calls=${empty.called}`);
 
+    /* CHN-10 默认策略：没勾「云端体验」时，无 Key 也绝不碰云端额度 */
+    const noTrial = await page.evaluate(async () => {
+      __t.seed({ history: [{ role: 'user', content: '走', id: 1 }], cloudTrial: false });
+      __t.patchChat('normal');
+      await generateReply();
+      return { cloudCalls: (window.__cap || []).length, avail: cloudStreamAvailable(), badge: document.getElementById('modeBadge').textContent };
+    });
+    check('CHN-10', '默认不开云端：零云端调用', noTrial.cloudCalls === 0 && noTrial.avail === false, `calls=${noTrial.cloudCalls} badge=${noTrial.badge}`);
+
+    /* CHN-11 额度用尽：即使开了开关也回退，不继续花应用额度 */
+    const exhausted = await page.evaluate(async () => {
+      __t.seed({ history: [{ role: 'user', content: '走', id: 1 }] });
+      localStorage.setItem('pn_cloud_trial_used', '6');   // seed 会清零，必须在它之后设置
+      refreshModeBadge();
+      __t.patchChat('normal');
+      await generateReply();
+      return {
+        calls: (window.__cap || []).length,
+        left: cloudTrialLeft(),
+        avail: cloudStreamAvailable(),
+        badge: document.getElementById('modeBadge').textContent
+      };
+    });
+    check('CHN-11', '体验次数用尽后自动回退演示', exhausted.calls === 0 && exhausted.left === 0 && exhausted.avail === false,
+      `left=${exhausted.left} badge=${exhausted.badge}`);
+    check('CHN-11b', '用尽后徽标不再显示云端体验', !/云端体验/.test(exhausted.badge), exhausted.badge);
+
+    /* CHN-12 有自己 Key 时，即使开着云端体验也不走应用额度 */
+    const ownKey = await page.evaluate(() => {
+      __t.seed({ history: [] });
+      state.config = Object.assign({}, state.config, { baseUrl: 'https://api.example.com/v1', apiKey: 'user-own-key', model: 'user-model', cloudTrial: true });
+      return { avail: cloudStreamAvailable(), liveKey: hasLiveKey() };
+    });
+    check('CHN-12', '自带 Key 优先，不占应用额度', ownKey.liveKey === true && ownKey.avail === false, `avail=${ownKey.avail}`);
+    await page.evaluate(() => { state.config = Object.assign({}, state.config, { apiKey: '', baseUrl: '', model: '' }); });
+
     const badge = await page.evaluate(() => {
       const out = [];
       state.config = Object.assign({}, state.config, { baseUrl: 'https://x/v1', apiKey: 'k', model: 'm1' });
@@ -439,7 +479,7 @@ async function main() {
       CLOUD_OK = false; BACKEND_OK = false; refreshModeBadge(); out.push(document.getElementById('modeBadge').textContent);
       return out;
     });
-    check('CHN-06', '徽标随通道切换', /已连接/.test(badge[0]) && /云端模型/.test(badge[1]) && /本地模式/.test(badge[2]), badge.join(' | '));
+    check('CHN-06', '徽标随通道切换', /已连接/.test(badge[0]) && /云端体验 · 剩 \d+ 次/.test(badge[1]) && /本地模式/.test(badge[2]), badge.join(' | '));
 
     check('ZERO-ERR', '全流程零 JS 异常', errors.length === 0, errors.slice(0, 2).join(' | '));
   } finally {

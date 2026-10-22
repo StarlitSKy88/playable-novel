@@ -57,8 +57,9 @@ const sleep = ms => new Promise(r => setTimeout(r, ms));
       process.exit(0);
     }
 
-    check('BOOT-05', '线上云服务置位且徽标显示云端模型',
-      boot.cloudOk === true && /云端模型/.test(boot.badge), boot.badge);
+    // 注意：默认策略下云端体验是关闭的，徽标应显示演示模式；这里只断言 SDK 就绪
+    check('BOOT-05', '线上云服务 SDK 就绪（默认不启用额度通道）',
+      boot.cloudOk === true && !/云端体验/.test(boot.badge), boot.badge);
     check('CLD-00', 'SDK 已加载、登录入口可用', boot.sdk && boot.btn.length > 0, boot.btn);
 
     // CHN-08 默认模型必须是低延迟档（不能是 auto）
