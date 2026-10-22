@@ -88,8 +88,11 @@ async function saveConfig(cfg) {
 function refreshModeBadge() {
   const badge = $('modeBadge');
   if (hasLiveKey()) {
-    badge.textContent = '⚡ 已连接 ' + state.config.model;
+    badge.textContent = (BACKEND_OK === false ? '📦 本地直连 · ' : '⚡ 已连接 ') + state.config.model;
     badge.className = 'mode-badge live';
+  } else if (BACKEND_OK === false) {
+    badge.textContent = '📦 本地模式';
+    badge.className = 'mode-badge local';
   } else {
     badge.textContent = '演示模式';
     badge.className = 'mode-badge demo';
@@ -197,26 +200,44 @@ function readFile(file) {
 async function parseNovel(text, isSample = false) {
   toast('⚡ 正在解析章节结构……');
   let data;
-  try {
-    const resp = await fetch('/api/novel/split', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ text })
-    });
-    data = await resp.json();
-    if (!resp.ok) throw new Error(data.error || '解析失败');
-  } catch (e) {
-    return toast('解析失败：' + e.message);
+  // 优先走后端；无后端（file:// 本地直用）时自动降级到前端引擎
+  if (BACKEND_OK === false) {
+    try {
+      const r = MockEngine.splitNovel(text);
+      data = Object.assign({}, r, { fullText: text });
+    } catch (e) {
+      return toast('解析失败：' + e.message);
+    }
+  } else {
+    try {
+      const resp = await fetch('/api/novel/split', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ text })
+      });
+      if (!resp.ok) throw new Error('HTTP ' + resp.status);
+      data = await resp.json();
+    } catch (e) {
+      // 后端不可用 → 永久降级本地模式
+      BACKEND_OK = false;
+      refreshModeBadge();
+      try {
+        const r = MockEngine.splitNovel(text);
+        data = Object.assign({}, r, { fullText: text });
+      } catch (e2) {
+        return toast('解析失败：' + e2.message);
+      }
+    }
   }
 
   state.novel = {
     title: isSample ? '星海学院的转学生（内置示例）' : data.title,
     chapters: data.chapters,
-    fullText: data.fullText
+    fullText: data.fullText || text
   };
   renderSideWorld();
   gotoStep('step-world');
-  toast(`✅ 解析完成：共 ${data.totalChapters} 章 / ${data.totalChars.toLocaleString()} 字`);
+  toast(`✅ 解析完成：共 ${data.totalChapters} 章 / ${(data.totalChars || 0).toLocaleString()} 字`);
   analyzeWorld();
 }
 
@@ -230,13 +251,21 @@ function bindWorld() {
 
 /* GitHub Star 实时计数（失败静默，不影响主流程） */
 async function loadStarCount() {
+  const el = $('starCount');
+  if (!el) return;
+  // 先展示上次缓存值（离线也有数字）
+  try {
+    const cached = localStorage.getItem('pn-star-count');
+    if (cached) { el.textContent = cached; }
+  } catch {}
   try {
     const r = await fetch('https://api.github.com/repos/StarlitSKy88/playable-novel');
     if (!r.ok) return;
     const d = await r.json();
     if (typeof d.stargazers_count === 'number') {
-      $('starCount').textContent = d.stargazers_count;
-      $('starCount').title = `${d.stargazers_count} 人点了 Star`;
+      el.textContent = d.stargazers_count;
+      el.title = `${d.stargazers_count} 人点了 Star`;
+      try { localStorage.setItem('pn-star-count', String(d.stargazers_count)); } catch {}
     }
   } catch { /* 离线或超限时保持占位 */ }
 }
@@ -280,20 +309,25 @@ async function analyzeWorld() {
 """${sample}"""`;
 
   let content;
-  try {
-    const r = await callAI([
-      { role: 'system', content: '你是一位专业的世界观架构师，擅长从小说文本中提炼设定。' },
-      { role: 'user', content: prompt }
-    ], 0.5, 900);
-    content = r.content;
-    addUsage(r.usage);
-  } catch (e) {
-    content = null;
-    toast('AI 推演失败：' + e.message);
+  // 演示模式没有真实 LLM 可用，直接用本地推演的世界卡片（narrate 通道会返回剧情 JSON，不适用）
+  if (!hasLiveKey()) {
+    content = demoWorldCard(novel);
+  } else {
+    try {
+      const r = await callAI([
+        { role: 'system', content: '你是一位专业的世界观架构师，擅长从小说文本中提炼设定。' },
+        { role: 'user', content: prompt }
+      ], 0.5, 900);
+      content = r.content;
+      addUsage(r.usage);
+    } catch (e) {
+      content = null;
+      toast('AI 推演失败：' + e.message);
+    }
   }
 
   if (!content) {
-    // 演示模式的兜底世界卡片
+    // 兜底世界卡片
     content = demoWorldCard(novel);
   }
 
@@ -360,6 +394,45 @@ function renderChapterPicker() {
     el.onclick = () => startStory(ch.id);
     list.appendChild(el);
   });
+}
+
+/* 步骤 3 的静态事件绑定（章节/角色列表由 renderChapterPicker 动态生成后自行绑定） */
+function bindChapters() {
+  // 自定义身份输入：回车即切换
+  $('customRoleName').addEventListener('keydown', e => {
+    if (e.key === 'Enter') { e.preventDefault(); $('btnCustomRole').click(); }
+  });
+  // 章节列表为空时给出引导（正常流程不会走到这里）
+  const list = $('chapterList');
+  if (!list.children.length && state.novel) renderChapterPicker();
+}
+
+/* ============================================================
+ * P1-8 角色状态面板
+ * ============================================================ */
+function renderStatePanel() {
+  const el = $('sideState');
+  const meta = $('stateMeta');
+  const s = state.charState;
+  if (!s) {
+    el.className = 'side-empty';
+    el.textContent = '尚未开始 · 进入故事后展示位置/关系/物品';
+    meta.textContent = '';
+    return;
+  }
+  el.className = 'state-panel';
+  const rel = Object.entries(s.relations || {}).filter(([, v]) => v);
+  const rows = [];
+  rows.push(`<div class="state-row"><span class="state-k">📍 位置</span>${escapeHtml(s.location || '未知')}</div>`);
+  if ((s.present || []).length) rows.push(`<div class="state-row"><span class="state-k">👥 在场</span>${escapeHtml(s.present.join('、'))}</div>`);
+  if ((s.items || []).length) rows.push(`<div class="state-row"><span class="state-k">🎒 物品</span>${escapeHtml(s.items.join('、'))}</div>`);
+  if (rel.length) {
+    rows.push(`<div class="state-row"><span class="state-k">💞 关系</span><div class="state-rels">${rel
+      .map(([k, v]) => `<span class="state-rel"><b>${escapeHtml(k)}</b>${escapeHtml(String(v))}</span>`).join('')}</div></div>`);
+  }
+  if ((s.foreshadowing || []).length) rows.push(`<div class="state-row"><span class="state-k">❓ 伏笔</span>${escapeHtml(s.foreshadowing.join('；'))}</div>`);
+  el.innerHTML = rows.join('');
+  meta.textContent = s.mood || '';
 }
 
 function guessProtagonist() {

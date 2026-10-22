@@ -116,6 +116,7 @@ body {
 }
 .mode-badge.demo { color: var(--warn); border-color: rgba(251, 191, 36, 0.3); background: rgba(251, 191, 36, 0.07); }
 .mode-badge.live { color: var(--good); border-color: rgba(52, 211, 153, 0.3); background: rgba(52, 211, 153, 0.07); }
+.mode-badge.local { color: var(--accent-2); border-color: rgba(167, 139, 250, 0.32); background: rgba(167, 139, 250, 0.08); }
 
 /* GitHub Star 按钮 */
 .star-btn {

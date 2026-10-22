@@ -184,7 +184,7 @@ function mockNarrate({ context, world, userInput, chapterTitle }) {
     () => `${pick(best)}。时间在这一刻被拉得很长。${pick(filler)}。命运似乎在你耳边低语：这条路上，没有后悔药，只有下一个选择。`
   ];
 
-  const narration = pick(templates)();
+  const narration = templates[Math.floor(Math.random() * templates.length)]();
   const suggestions = [
     `仔细观察周围，寻找可疑之处`,
     `尝试与最近的人物搭话`,
@@ -241,8 +241,37 @@ function shuffle(arr) {
   }
   return a;
 }
+/* 环境描写句库：pick 轮转取用，避免每轮都出现同一句（与前端 mock-engine 保持一致） */
+const AMBIENCE = [
+  '风穿过空旷的街巷，卷起几片落叶',
+  '远处传来钟声，沉重地敲在心上',
+  '灯火在墙上投下摇曳的影子',
+  '空气里浮动着说不清的躁动',
+  '有什么东西在暗处轻轻移动',
+  '窗外的雨下了整夜，未曾停歇',
+  '人群的喧嚣忽然低了下去',
+  '一盏孤灯在无人的角落亮着',
+  '铁轨的震动由远及近',
+  '树叶翻起背面，露出灰白的叶脉',
+  '长廊尽头的门虚掩着',
+  '钟表声在寂静中被无限放大',
+  '楼下的脚步声停住了',
+  '水面泛起细密的涟漪',
+  '告示栏上的纸被风掀起一角',
+  '巷口的灯笼晃了晃',
+  '远处的山脊没入低垂的云',
+  '有什么在暗处睁开了眼'
+];
+let _ambIdx = Math.floor(Math.random() * AMBIENCE.length);
+function ambience() {
+  const s = AMBIENCE[_ambIdx % AMBIENCE.length];
+  _ambIdx++;
+  return s;
+}
 function pick(arr) {
-  return arr.length ? arr[Math.floor(Math.random() * arr.length)] : '风穿过空旷的街巷，卷起几片落叶';
+  const s = (arr && arr.length) ? arr[Math.floor(Math.random() * arr.length)] : ambience();
+  // 统一去掉尾部标点，交由调用处拼接，避免出现「。。」
+  return String(s).replace(/[。，、；：！？…\s]+$/, '');
 }
 function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
 
