@@ -49,6 +49,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   bindSettings();
   bindWorld();
   bindChapters();
+  bindStepNav();
   bindPlay();
   bindCloud();
   refreshModeBadge();
@@ -542,8 +543,9 @@ async function parseNovel(text, isSample = false, metaTitle = null) {
 
   state.novel = {
     title: isSample ? '星海学院的转学生（内置示例）' : (metaTitle || data.title),
-    chapters: data.chapters,
-    fullText: data.fullText || text
+    chapters: data.chapters || [],
+    // 用客户端手里的完整原文：后端返回的 fullText 是截断版，长篇会丢失后半段章节正文
+    fullText: text || data.fullText || ''
   };
 
   // P2-13 语言自适应：检测原著语言
@@ -717,11 +719,15 @@ function renderChapterPicker() {
   // 章节列表
   const list = $('chapterList');
   list.innerHTML = '';
-  state.novel.chapters.forEach(ch => {
+  (state.novel.chapters || []).forEach(ch => {
     const el = document.createElement('div');
     el.className = 'chapter-item';
-    el.innerHTML = `<h4>${escapeHtml(ch.title)}</h4><p>${escapeHtml(ch.preview)}</p>
-      <div class="ch-meta">约 ${ch.length.toLocaleString()} 字 · 点击从此处进入故事</div>`;
+    // 防御式取值：任何一项缺失都不能让整张列表渲染失败（曾导致页面卡死在空列表）
+    const title = ch.title || '未命名章节';
+    const preview = ch.preview || (ch.text || ch.content || '').replace(/\s+/g, ' ').slice(0, 120);
+    const len = Number.isFinite(ch.length) ? ch.length : (preview || '').length;
+    el.innerHTML = `<h4>${escapeHtml(title)}</h4><p>${escapeHtml(preview)}</p>
+      <div class="ch-meta">约 ${len.toLocaleString()} 字 · 点击从此处进入故事</div>`;
     el.onclick = () => startStory(ch.id);
     list.appendChild(el);
   });
@@ -2288,6 +2294,28 @@ function scrollBottom() {
  * ============================================================ */
 /* 步骤切换：面板 + 顶部步骤进度条联动 */
 const STEP_ORDER = ['upload', 'world', 'chapters', 'play'];
+
+/* 步骤条回退：点击已完成的步骤即可回到那一步。
+   之前步骤条完全不可点，一旦某步状态异常（如章节列表为空）用户就被彻底卡死。 */
+function bindStepNav() {
+  document.querySelectorAll('.step-bar-item').forEach(el => {
+    el.classList.add('clickable');
+    el.title = '点击回到该步骤';
+    el.onclick = () => {
+      const target = el.dataset.step;
+      const cur = STEP_ORDER.indexOf(document.body.dataset.step);
+      const to = STEP_ORDER.indexOf(target);
+      if (to > cur) {
+        // 不允许跳过中间步骤：需要对应数据才放行
+        if (target === 'world' && !state.novel) return toast('请先上传小说');
+        if (target === 'chapters' && !state.novel) return toast('请先上传小说');
+        if (target === 'play' && !state.history.length) return toast('还没有剧情，先从章节入口开始');
+      }
+      if (target === 'chapters') renderChapterPicker();
+      gotoStep('step-' + target);
+    };
+  });
+}
 function gotoStep(id) {
   document.querySelectorAll('.panel').forEach(p => p.classList.remove('active'));
   $(id).classList.add('active');
@@ -2346,7 +2374,8 @@ async function saveProgress() {
       lastFactTurn: state.lastFactTurn,
       sourceLang: state.sourceLang,
       outputLang: state.outputLang,
-      lastCanonCheck: state.lastCanonCheck || 0
+      lastCanonCheck: state.lastCanonCheck || 0,
+      characters: state.characters || []      // 刷新后角色选项要完整
     });
   } catch (e) { console.warn('保存进度失败:', e.message); }
 }
@@ -2368,6 +2397,7 @@ async function restoreProgress() {
     state.charState = (s && s.charState) || null;
     state.factList = (s && s.factList) || '';
     state.lastFactTurn = (s && s.lastFactTurn) || 0;
+    state.characters = (s && s.characters) || state.characters || [];
     state.lastCanonCheck = (s && s.lastCanonCheck) || 0;
     // P2-13 语言状态
     state.sourceLang = (s && s.sourceLang) || (state.novel ? PNParser.detectLanguage(state.novel.fullText || '') : null);
@@ -2388,6 +2418,8 @@ async function restoreProgress() {
         gotoStep('step-play');
         renderHistory();
       } else {
+        // 必须渲染章节/角色列表：否则刷新后停在第 3 步却是空列表，用户无法选择入口
+        renderChapterPicker();
         gotoStep('step-chapters');
       }
       toast('已恢复上次的阅读进度');

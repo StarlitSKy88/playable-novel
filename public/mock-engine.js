@@ -166,7 +166,7 @@
       title: firstLine || '未命名小说',
       totalChapters: chapters.length,
       totalChars: raw.length,
-      chapters: chapters.slice(0, 60).map(c => ({
+      chapters: chapters.map(c => ({
         id: c.id,
         title: c.title,
         preview: c.text.replace(/\s+/g, ' ').slice(0, 120),

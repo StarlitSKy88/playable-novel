@@ -70,7 +70,8 @@ app.post('/api/novel/split', (req, res) => {
       title: guessTitle(raw),
       totalChapters: chapters.length,
       totalChars,
-      chapters: chapters.slice(0, 60).map(c => ({
+      // 不再截断章节数：长篇小说的入口选择必须覆盖全部章节
+      chapters: chapters.map(c => ({
         id: c.id,
         title: c.title,
         preview: c.text.replace(/\s+/g, ' ').slice(0, 120),

@@ -481,6 +481,51 @@ async function main() {
     });
     check('CHN-06', '徽标随通道切换', /已连接/.test(badge[0]) && /云端体验 · 剩 \d+ 次/.test(badge[1]) && /本地模式/.test(badge[2]), badge.join(' | '));
 
+    console.log('\n▸ K. 恢复与导航（BOOT-08 / BOOT-09 / CHP-06）');
+    // 模拟真实用户场景：IndexedDB 里已有小说 + 世界卡片，但还没开始剧情
+    await page.evaluate(async () => {
+      const chapters = Array.from({ length: 60 }, (_, i) => ({
+        id: i + 1, title: `第${i + 1}章 晨露`, preview: '正文预览'.repeat(20), length: 2400
+      }));
+      await DB.set(PN_STORE.novel, 'main', { title: '晨露之刃', fullText: 'x', chapters });
+      await DB.set(PN_STORE.progress, 'main', {
+        world: '## 世界名称\n晨露之刃', selectedRole: '法修', entryChapter: 3,
+        history: [], events: [], turn: 0, characters: [{ name: '法修', desc: '少年修士' }],
+        usage: { promptTokens: 0, completionTokens: 0, calls: 0 }
+      });
+    });
+    await page.reload({ waitUntil: 'networkidle2' });
+    await page.waitForFunction(() => !document.body.classList.contains('booting'), { timeout: 20000 });
+    await sleep(1200);
+    const restored = await page.evaluate(() => ({
+      step: document.body.dataset.step,
+      chapters: document.querySelectorAll('#chapterList .chapter-item').length,
+      roles: document.querySelectorAll('#roleOptions .role-opt').length,
+      firstChapter: (document.querySelector('#chapterList .chapter-item h4') || {}).textContent || ''
+    }));
+    check('BOOT-08', '刷新恢复到选章步时章节列表非空',
+      restored.step === 'chapters' && restored.chapters > 0, `step=${restored.step} 章节=${restored.chapters}`);
+    check('BOOT-08b', '刷新后角色选项非空', restored.roles > 0, `角色 ${restored.roles} 个`);
+    check('BOOT-08c', '章节标题正确渲染', /第1章/.test(restored.firstChapter), restored.firstChapter);
+
+    // 章节数据缺字段（老数据/异常数据）时不能整列表崩掉
+    const malformed = await page.evaluate(() => {
+      state.novel = { title: 'x', fullText: 'x', chapters: [{ id: 1, title: '缺字段章' }, { id: 2 }] };
+      try {
+        renderChapterPicker();
+        return { ok: true, n: document.querySelectorAll('#chapterList .chapter-item').length };
+      } catch (e) { return { ok: false, message: e.message }; }
+    });
+    check('BOOT-09', '章节字段缺失不导致列表崩溃', malformed.ok && malformed.n === 2, `items=${malformed.n} ${malformed.message || ''}`);
+
+    // 步骤条可回退：卡住时能回到上传步骤
+    const nav = await page.evaluate(() => {
+      const el = document.querySelector('.step-bar-item[data-step="upload"]');
+      el.click();
+      return { step: document.body.dataset.step, clickable: el.classList.contains('clickable') };
+    });
+    check('CHP-06', '步骤条可点击回退到上传步骤', nav.clickable && nav.step === 'upload', `step=${nav.step}`);
+
     check('ZERO-ERR', '全流程零 JS 异常', errors.length === 0, errors.slice(0, 2).join(' | '));
   } finally {
     await browser.close();
