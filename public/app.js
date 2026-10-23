@@ -50,6 +50,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   bindWorld();
   bindChapters();
   bindStepNav();
+  bindHome();
   bindPlay();
   bindCloud();
   refreshModeBadge();
@@ -2314,6 +2315,24 @@ function bindStepNav() {
       if (target === 'chapters') renderChapterPicker();
       gotoStep('step-' + target);
     };
+  });
+}
+
+/* 左上角品牌 → 回到首页（步骤 1 / Hero）。
+   返回首页不会清空内存中的小说/世界/历史，步骤条仍可跳回「互动舞台」继续；
+   若有进行中的剧情，先显式存一次，避免误返首页丢进度。 */
+function bindHome() {
+  const brand = $('brandHome');
+  if (!brand) return;
+  brand.classList.add('clickable');
+  const go = () => {
+    if (state.playing && state.history.length > 0) saveProgress();
+    gotoStep('step-upload');
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  };
+  brand.addEventListener('click', go);
+  brand.addEventListener('keydown', e => {
+    if (e.key === 'Enter' || e.key === ' ' || e.key === 'Spacebar') { e.preventDefault(); go(); }
   });
 }
 function gotoStep(id) {

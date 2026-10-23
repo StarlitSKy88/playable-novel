@@ -526,6 +526,36 @@ async function main() {
     });
     check('CHP-06', '步骤条可点击回退到上传步骤', nav.clickable && nav.step === 'upload', `step=${nav.step}`);
 
+    // 左上角品牌点击 → 回到首页（步骤 1 / Hero），且保留内存中的剧情
+    await page.evaluate(() => {
+      state.novel = { title: 't', fullText: '第1章 x\ny', chapters: [{ id: 1, title: '第1章 x', preview: 'y', length: 2 }] };
+      state.playing = true;
+      state.history = [{ role: 'user', content: '我向前走', id: 1 }, { role: 'assistant', content: '你走了一步', id: 2 }];
+      gotoStep('step-play');
+    });
+    await sleep(200);
+    const homeBefore = await page.evaluate(() => ({
+      clickable: document.getElementById('brandHome').classList.contains('clickable'),
+      role: document.getElementById('brandHome').getAttribute('role')
+    }));
+    check('BOOT-10', '左上角品牌可点击且具可访问性', homeBefore.clickable && homeBefore.role === 'button', `role=${homeBefore.role}`);
+    await page.evaluate(() => document.getElementById('brandHome').click());
+    await sleep(300);
+    const homeAfter = await page.evaluate(() => ({
+      step: document.body.dataset.step,
+      heroVisible: getComputedStyle(document.getElementById('hero')).display !== 'none',
+      historyKept: state.history.length,
+      playingKept: state.playing
+    }));
+    check('BOOT-11', '点击品牌回到首页且显示 Hero', homeAfter.step === 'upload' && homeAfter.heroVisible, `step=${homeAfter.step}`);
+    check('BOOT-11b', '返回首页不丢内存中的剧情', homeAfter.historyKept === 2 && homeAfter.playingKept === true, `history=${homeAfter.historyKept}`);
+    // 键盘可达性：聚焦后按 Enter 同样回到首页
+    await page.evaluate(() => document.getElementById('brandHome').focus());
+    await page.keyboard.press('Enter');
+    await sleep(300);
+    const viaKbd = await page.evaluate(() => document.body.dataset.step);
+    check('BOOT-12', '键盘 Enter 可触发回到首页', viaKbd === 'upload', `step=${viaKbd}`);
+
     check('ZERO-ERR', '全流程零 JS 异常', errors.length === 0, errors.slice(0, 2).join(' | '));
   } finally {
     await browser.close();
