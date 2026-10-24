@@ -1,0 +1,142 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
+  <title>星海学院的转学生 · 可玩小说</title>
+  <link rel="stylesheet" href="./assets/style.css" />
+</head>
+<body>
+  <div class="sky" aria-hidden="true"></div>
+
+  <div class="app">
+    <!-- 顶栏 -->
+    <header class="topbar">
+      <span class="mark" aria-hidden="true">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2Z"/></svg>
+      </span>
+      <div>
+        <div class="t-title">星海学院的转学生</div>
+        <div class="t-sub">可玩小说 · 离线试玩版</div>
+      </div>
+      <span class="grow"></span>
+      <button class="iconbtn" id="btnCodexTop" type="button">图鉴</button>
+    </header>
+
+    <!-- 封面 -->
+    <section class="view on" id="view-cover">
+      <div class="scroll cover">
+        <span class="badge"><i></i>BYOK 互动叙事 · 离线试玩</span>
+        <h1 class="h1">把小说，<br />变成<span class="em">能走进去的世界</span></h1>
+        <p class="lead">
+          你在旧书店翻开一本没有封皮的旧书，醒来时已经躺在星海学院的床上。
+          手背上多了一道淡金色的印记，而学院云海之下，压着某个四百年没人敢提起的东西。
+        </p>
+        <div class="stats">
+          <div class="stat"><b>4</b><span>种结局</span></div>
+          <div class="stat"><b>5</b><span>条线索</span></div>
+          <div class="stat"><b>2</b><span>种身份</span></div>
+        </div>
+        <div class="btn-row">
+          <button class="btn" id="btnStart" type="button">开始解析我的故事</button>
+          <button class="btn ghost" id="btnContinue" type="button" style="display:none">继续上次进度</button>
+          <button class="btn ghost" id="btnCodex" type="button">结局图鉴与线索</button>
+        </div>
+        <p class="note">
+          本版为小红书离线试玩包：剧情由本地数据驱动，不联网、不上传任何信息。
+          完整版支持导入你自己的小说，并由大模型实时生成后续剧情。
+        </p>
+      </div>
+    </section>
+
+    <!-- 世界卡片 -->
+    <section class="view" id="view-world">
+      <div class="scroll">
+        <div class="world-head">
+          <div class="eyebrow" style="text-align:center">世界卡片 · 已推演</div>
+          <div class="wname" id="wName">星海学院</div>
+          <div class="wtype" id="wType">浮空魔法学院 · 封印传承</div>
+        </div>
+        <div class="card"><div class="k">核心设定</div><div class="v" id="wPremise"></div></div>
+        <div class="card"><div class="k">力量体系</div><div class="v" id="wPowers"></div></div>
+        <div class="card"><div class="k">势力</div><div class="v" id="wFactions"></div></div>
+        <div class="card"><div class="k">当前危机</div><div class="v" id="wCrisis"></div></div>
+        <div class="btn-row">
+          <button class="btn" id="btnToRole" type="button">选择你的身份</button>
+        </div>
+      </div>
+    </section>
+
+    <!-- 身份选择 -->
+    <section class="view" id="view-role">
+      <div class="scroll">
+        <div class="eyebrow">选择你的身份</div>
+        <h2 class="h1" style="font-size:22px">同一个故事，<span class="em">两种走法</span></h2>
+        <p class="lead">不同身份会看到不同的线索，也会走向不同的结局。</p>
+        <div class="divider"></div>
+        <div id="roleList"></div>
+      </div>
+    </section>
+
+    <!-- 故事 -->
+    <section class="view" id="view-story">
+      <div class="story-top">
+        <span class="ch" id="storyCh">第一章</span>
+        <button class="iconbtn" id="btnUndo" type="button">回溯</button>
+        <button class="iconbtn" id="btnClues" type="button">线索</button>
+      </div>
+      <div class="scroll" id="storyScroll">
+        <div class="passage" id="passage"></div>
+        <div class="tap-hint" id="tapHint">轻触屏幕继续</div>
+        <div class="choices" id="choices"></div>
+      </div>
+    </section>
+
+    <!-- 结局 -->
+    <section class="view" id="view-ending">
+      <div class="scroll" style="justify-content:center">
+        <span class="ending-tag" id="endNo">结局一</span>
+        <div class="ending-title" id="endTitle">归星者</div>
+        <div class="ending-sub" id="endSub"></div>
+        <div class="divider"></div>
+        <div class="passage" id="endText"></div>
+        <div class="divider"></div>
+        <div class="card">
+          <div class="k">结局图鉴</div>
+          <div class="v" id="endProgress">已解锁 1 / 4</div>
+        </div>
+        <div class="btn-row">
+          <button class="btn" id="btnAgain" type="button">再走一次</button>
+          <button class="btn ghost" id="btnSwap" type="button">换个身份重来</button>
+          <button class="btn ghost" id="btnCodex2" type="button">查看完整图鉴</button>
+        </div>
+      </div>
+    </section>
+
+    <!-- 图鉴 -->
+    <section class="view" id="view-codex">
+      <div class="scroll">
+        <div class="eyebrow">结局图鉴</div>
+        <h2 class="h1" style="font-size:22px">你走过的<span class="em">每一种可能</span></h2>
+        <div class="divider"></div>
+        <div id="codexList"></div>
+        <div class="divider"></div>
+        <div class="eyebrow">线索收集</div>
+        <div class="card" id="clueList"></div>
+        <p class="progress-note" id="codexNote">集齐 5 条线索，可在终章解锁隐藏结局「守印者」。</p>
+        <div class="btn-row">
+          <button class="btn ghost" id="btnBack" type="button">返回</button>
+        </div>
+      </div>
+    </section>
+  </div>
+
+  <div class="clue-toast" id="clueToast">
+    <span class="cn" id="toastName"></span>
+    <span class="cd" id="toastDesc"></span>
+  </div>
+
+  <script src="./assets/story.js"></script>
+  <script src="./assets/main.js"></script>
+</body>
+</html>

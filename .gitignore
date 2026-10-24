@@ -8,3 +8,7 @@ assets-src
 # WorkBuddy 应用标记（本地使用，不入库）
 .wbapp_*.genie
 .workbuddy/
+
+# 小红书小工具（构建产物，源码在 xhs-minitool/src）
+xhs-minitool/dist/
+xhs-minitool/node_modules/
